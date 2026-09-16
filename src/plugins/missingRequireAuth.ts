@@ -12,8 +12,7 @@ export class MissingRequireAuthPlugin implements Rule {
     const fns = extractRustFunctions(sanitizeKeepLines(code));
 
     for (const fn of fns) {
-      const brace = fn.body.indexOf("{");
-      const body = brace >= 0 ? fn.body.slice(brace) : fn.body;
+      const body = fn.analysisBody;
       const sensitive =
         /client\.|\btransfer\b|\btransfer_from\b|\bburn\b|\bbump_arc\b|\bput_arc\b|\bdel_arc\b|\bget_arc\b|\.set\s*\(/.test(
           body,
