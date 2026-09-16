@@ -1,5 +1,5 @@
 import type { Rule, Vulnerability } from "../types";
-import { removeComments } from "../utils/rust.js";
+import { extractRustFunctions, removeComments } from "../utils/rust.js";
 
 export class MissingExtendTtlPlugin implements Rule {
   id = "AP-STORAGE-001";
@@ -10,22 +10,29 @@ export class MissingExtendTtlPlugin implements Rule {
   scan(code: string): Vulnerability[] {
     const findings: Vulnerability[] = [];
     const clean = removeComments(code);
+    const functions = extractRustFunctions(clean);
     const storage = /storage\s*\(\s*\)\s*\./;
 
-    if (!storage.test(clean)) {
+    // Macro definitions are declarations, not executed code. Only function
+    // bodies plus local macro bodies actually invoked by those functions count.
+    const storageFunction = functions.find((fn) => storage.test(fn.analysisBody));
+    if (storageFunction === undefined) {
       return findings;
     }
 
+    const macroAwareFunctions = functions.map((fn) => fn.analysisBody).join("\n");
     const extended =
-      /\.extend_ttl\s*\(/.test(clean) ||
-      /extend_ttl_to_threshold\s*\(/.test(clean) ||
-      /get_extended\s*\(/.test(clean);
+      /\.extend_ttl\s*\(/.test(macroAwareFunctions) ||
+      /extend_ttl_to_threshold\s*\(/.test(macroAwareFunctions) ||
+      /get_extended\s*\(/.test(macroAwareFunctions);
     if (extended) {
       return findings;
     }
 
-    const line = clean.split("\n").findIndex((value) => storage.test(value));
-    if (line >= 0) {
+    const bodyLines = storageFunction.body.split("\n");
+    const bodyLine = bodyLines.findIndex((value) => storage.test(value));
+    const line = bodyLine >= 0 ? storageFunction.line + bodyLine : storageFunction.line;
+    if (line >= 1) {
       findings.push({
         id: "AP-STORAGE-001",
         message:
@@ -33,7 +40,8 @@ export class MissingExtendTtlPlugin implements Rule {
         severity: "high",
         confidence: "medium",
         location: {
-          line: line + 1,
+          line,
+          function: storageFunction.name,
         },
         remediation:
           "After reading or writing persistent/temporary storage, call env.storage().persistent().extend_ttl(&key, threshold, extend_to) or extend_ttl_to_threshold to keep entries alive.",

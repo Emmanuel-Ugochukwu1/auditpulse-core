@@ -36,7 +36,7 @@ export class UnprotectedUpgradePlugin implements Rule {
       if (!ADMIN_FUNCTION_NAME.test(fn.name)) {
         continue;
       }
-      if (AUTHORIZATION_CHECK.test(fn.bodyInner)) {
+      if (AUTHORIZATION_CHECK.test(fn.analysisBodyInner)) {
         continue;
       }
 

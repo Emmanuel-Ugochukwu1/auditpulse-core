@@ -21,7 +21,7 @@ export class UnvalidatedExternalCallPlugin implements Rule {
     const fns = extractRustFunctions(sanitizeKeepLines(code));
 
     for (const fn of fns) {
-      const body = fn.bodyInner;
+      const body = fn.analysisBodyInner;
       const sensitive =
         /client\s*\.\s*(?:transfer|transfer_from|burn|mint|clawback|set_authorized|set_admin)\s*\(/.test(
           body,
