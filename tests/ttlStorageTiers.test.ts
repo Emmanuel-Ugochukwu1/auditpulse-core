@@ -98,6 +98,31 @@ describe("TTL storage tiers fixture (issue #1)", () => {
     expect(MissingExtendTtlPlugin.scan(code)).toEqual([]);
   });
 
+  it.each(["persistent", "temporary", "instance"] as const)(
+    "flags unmanaged %s storage on its own",
+    (tier) => {
+      const code = `fn save(env: Env, key: Symbol, value: i128) {
+        env.storage().${tier}().set(&key, &value);
+      }`;
+
+      const findings = MissingExtendTtlPlugin.scan(code);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]?.id).toBe("AP-STORAGE-001");
+    },
+  );
+
+  it.each(["persistent", "temporary"] as const)(
+    "stays silent when %s storage is extended",
+    (tier) => {
+      const code = `fn save(env: Env, key: Symbol, value: i128) {
+        env.storage().${tier}().set(&key, &value);
+        env.storage().${tier}().extend_ttl(&key, 100, 200);
+      }`;
+
+      expect(MissingExtendTtlPlugin.scan(code)).toEqual([]);
+    },
+  );
+
   it("exposes the TTL finding through SARIF for CI/CD upload", () => {
     const engine = new AuditEngine(createDefaultRegistry());
     const report = scanTarget(
