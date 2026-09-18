@@ -16,7 +16,7 @@ const ADMIN_FUNCTION_NAME =
  * without require_auth is NOT accepted as a boundary.
  */
 const AUTHORIZATION_CHECK =
-  /require_auth(?:_for_args)?\s*\(|\bhas_admin\b|\bis_admin\b|\bassert_admin\b|\bcheck_admin\b|\bonly_admin\b|\bowner_check\b|\bverify_admin\b/i;
+  /require_auth(?:_for_args)?\s*!?\s*[\(\[{]|\bhas_admin\b|\bis_admin\b|\bassert_admin\b|\bcheck_admin\b|\bonly_admin\b|\bowner_check\b|\bverify_admin\b/i;
 
 /**
  * AP-UPG-001 — flags upgrade/admin-sensitive functions that contain no
