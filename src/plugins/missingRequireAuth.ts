@@ -9,8 +9,8 @@ import { extractRustFunctions, functionLocation, sanitizeKeepLines } from "../ut
 const SENSITIVE_OP =
   /client\.|\btransfer\b|\btransfer_from\b|\bburn\b|\bbump_arc\b|\bput_arc\b|\bdel_arc\b|\bget_arc\b|\.set\s*\(/;
 
-/** An explicit authorization check inside the function body. */
-const AUTH_CHECK = /require_auth(?:_for_args)?\s*\(/;
+/** An explicit authorization check inside the function body (direct call or macro invocation). */
+const AUTH_CHECK = /require_auth(?:_for_args)?\s*!?\s*[\(\[{]/;
 
 export class MissingRequireAuthPlugin implements Rule, FunctionRule {
   id = "AP-AUTH-001";
