@@ -1,6 +1,6 @@
 import type { Rule, ScannedFunction, Vulnerability } from "../types";
 import type { AstAwareRule } from "../engine.js";
-import { locateLine, removeComments } from "../utils/rust.js";
+import { locateLine, removeCommentsKeepLines } from "../utils/rust.js";
 
 export class MissingExtendTtlPlugin implements Rule, AstAwareRule {
   id = "AP-STORAGE-001";
@@ -19,7 +19,7 @@ export class MissingExtendTtlPlugin implements Rule, AstAwareRule {
    * function and its fn-keyword column are attached.
    */
   scanCode(code: string, functions: ScannedFunction[] | null): Vulnerability[] {
-    const clean = removeComments(code);
+    const clean = removeCommentsKeepLines(code);
     const storage = /storage\s*\(\s*\)\s*\./;
 
     if (!storage.test(clean)) {
