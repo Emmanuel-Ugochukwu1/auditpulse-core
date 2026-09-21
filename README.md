@@ -11,6 +11,8 @@ Lightweight static analysis security scanner for Soroban (Stellar) smart contrac
 * **`unvalidatedExternalCall`** (`AP-CALL-001`): Flags cross-contract/token operations (transfers, burns, mints, admin changes) with no `require_auth` and no evidence-backed validation: an explicitly checked id (`assert!`/`require!`/comparison) before the call suppresses the finding, an unchecked user-supplied `*_id` argument is reported (medium confidence — naming alone is not a boundary), and a storage-resolved id target is reported at low confidence.
 * **`unprotectedUpgrade`** (`AP-UPG-001`): Flags upgrade/migration/admin-configuration functions (recognized by name) that contain no `require_auth` or admin check.
 * **`debugStatements`** (`AP-DEBUG-001`): Flags debug/development-only macros (`log!`, `dbg!`, `println!`, `print!`, `eprint(ln)!`) left in production contract code.
+* **`unsafeCasts`** (`AP-CAST-001`): Detects narrowing integer casts on amount-like values (`amount as u64`, `balance as i32`) that silently truncate i128 values.
+* **`unvalidatedAmountBounds`** (`AP-BOUND-001`): Flags entrypoints (`deposit`, `withdraw`, `mint`, `burn`, `transfer`) that move amounts without any bounds check (such as `assert!(amount > 0)`).
 
 ### Severity and confidence
 
@@ -26,6 +28,8 @@ detected pattern is actually problematic. The two are independent:
 | `AP-CALL-001` | high | low–medium (tiered by evidence) |
 | `AP-UPG-001` | critical | medium |
 | `AP-DEBUG-001` | low | high |
+| `AP-CAST-001` | medium | medium |
+| `AP-BOUND-001` | low | low |
 
 ### Fixtures
 
@@ -184,10 +188,11 @@ omitted when the rule does not provide them.
 node dist/index.js sarif contracts/SampleVault.rs > auditpulse.sarif
 ```
 
-Emits SARIF 2.1.0 with the tool driver, rule metadata (ids, descriptions,
-levels) and one result per finding with file URI and start line (plus start
-column when the rule verified it), ready for
-upload to GitHub Code Scanning.
+Emits SARIF 2.1.0 with the tool driver, enriched rule metadata (ids,
+descriptions, help URIs, tags, severity levels), run automation details, and
+one result per finding with file URI, precise start line and column, confidence-derived
+precision, and deterministic SHA-256 `partialFingerprints` for stable GitHub
+Code Scanning alert tracking across line shifts. Ready for upload to GitHub Code Scanning.
 
 ## Configuration
 
@@ -198,10 +203,27 @@ any parent, or can be given explicitly with `--config`:
 disabled_rules = ["AP-DEBUG-001"]
 min_severity = "low"          # low | medium | high | critical
 exclude = ["vendor", "generated"]
+
+[severity_overrides]
+AP-STORAGE-001 = "medium"     # tune individual rule severities
+AP-ARITH-001 = "low"
 ```
 
 Without a config file, defaults apply: all rules enabled, `min_severity =
 "low"`, no extra exclusions. Invalid values are rejected with exit code 2.
+
+### Inline Suppressions
+
+To suppress a specific finding without disabling the rule globally, add an `auditpulse-ignore <RULE-ID>` comment either directly on the finding's line or on the line immediately above it:
+
+```rust
+// auditpulse-ignore AP-AUTH-001
+pub fn admin_action(env: Env) {
+    // ...
+}
+
+let result = a + b; // auditpulse-ignore AP-ARITH-001
+```
 
 ## Exit codes
 
@@ -309,6 +331,8 @@ acceptance criteria. These are maintainer-planned items derived from the
 codebase itself — new rule candidates, fixture coverage, configuration, and
 reporting enhancements.
 
+* [Contributing Guide](CONTRIBUTING.md) — development workflow, setup, and PR conventions
+* [Writing a Rule Guide](docs/writing-a-rule.md) — end-to-end walkthrough for implementing new rule plugins
 * Issue tracker: <https://github.com/Emmanuel-Ugochukwu1/auditpulse-core/issues>
 * Roadmap overview: `docs/ROADMAP_ISSUES.md`
 * Issues labeled `good first issue` are scoped for a first contribution
@@ -322,10 +346,14 @@ run; it skips titles that already exist, so it never creates duplicates).
 Built with TypeScript: Tree-sitter provides function structure, source-text pattern rules perform the checks, and Vitest tests it all.
 
 ```bash
-# Type check
-npx tsc --noEmit
-
-# Run unit tests
+# Run complete test suite
 npm test
 
+# Type check strictly
+npm run typecheck
+
+# Build distribution bundle
+npm run build
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full architectural guidelines and testing conventions.
