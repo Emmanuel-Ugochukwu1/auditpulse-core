@@ -82,6 +82,7 @@ describe("resolveConfig", () => {
       disabledRules: [],
       minSeverity: "low",
       exclude: [],
+      severityOverrides: {},
     });
     expect(config).toEqual(defaultConfig());
   });
@@ -127,5 +128,46 @@ describe("SEVERITY_ORDER", () => {
         SEVERITY_ORDER[levels[i - 1]!],
       );
     }
+  });
+});
+
+describe("severity_overrides and inline suppressions (#17)", () => {
+  it("parses severity_overrides inline table", () => {
+    const parsed = parseConfig(
+      'severity_overrides = { "AP-STORAGE-001" = "medium", AP-DEBUG-001 = "high" }',
+    );
+    expect(parsed.severityOverrides).toEqual({
+      "AP-STORAGE-001": "medium",
+      "AP-DEBUG-001": "high",
+    });
+  });
+
+  it("rejects malformed severity_overrides or invalid severity values with line numbers", () => {
+    expect(() =>
+      parseConfig('severity_overrides = ["AP-STORAGE-001"]'),
+    ).toThrow(/line 1/);
+    expect(() =>
+      parseConfig('severity_overrides = { "AP-STORAGE-001" = "extreme" }'),
+    ).toThrow(/line 1/);
+    expect(() =>
+      parseConfig('severity_overrides = { "AP-STORAGE-001" = medium }'),
+    ).toThrow(/line 1/);
+  });
+
+  it("rejects unknown rule ids in resolveConfig severityOverrides", () => {
+    expect(() =>
+      resolveConfig(
+        { severityOverrides: { "AP-UNKNOWN-999": "low" } },
+        RULE_IDS,
+      ),
+    ).toThrow(/Unknown rule id in severity_overrides: AP-UNKNOWN-999/);
+  });
+
+  it("merges valid severityOverrides in resolveConfig", () => {
+    const resolved = resolveConfig(
+      { severityOverrides: { "AP-STORAGE-001": "medium" } },
+      RULE_IDS,
+    );
+    expect(resolved.severityOverrides).toEqual({ "AP-STORAGE-001": "medium" });
   });
 });

@@ -1,3 +1,4 @@
+import { applyInlineSuppressions } from "./config.js";
 import type { Rule, RuleId, ScannedFunction, Vulnerability } from "./types";
 import type { RuleRegistry } from "./registry";
 import { extractRustFunctionsAst } from "./parser/rust.js";
@@ -51,7 +52,8 @@ export class AuditEngine {
     if (!rule) {
       throw new Error(`Unknown rule id: ${id}`);
     }
-    return rule.scan(code).map((finding) => stampRuleId(rule, finding));
+    const raw = rule.scan(code).map((finding) => stampRuleId(rule, finding));
+    return applyInlineSuppressions(code, raw);
   }
 
   /**
@@ -79,7 +81,7 @@ export class AuditEngine {
       }
       findings.push(...this.runRule(rule.id, code));
     }
-    return findings;
+    return applyInlineSuppressions(code, findings);
   }
 }
 
