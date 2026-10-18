@@ -101,6 +101,14 @@ describe("fixtures/safe", () => {
   it("auth_gated.rs produces no findings", () => {
     expect(idsOf(scanFixture("safe/auth_gated.rs"))).toEqual([]);
   });
+
+  it("receiver_form_auth.rs produces no findings", () => {
+    expect(idsOf(scanFixture("safe/receiver_form_auth.rs"))).toEqual([]);
+  });
+
+  it("multi_op_and_subcontract_auth.rs produces no findings", () => {
+    expect(idsOf(scanFixture("safe/multi_op_and_subcontract_auth.rs"))).toEqual([]);
+  });
 });
 
 describe("fixtures/edge-cases", () => {
@@ -148,6 +156,22 @@ describe("fixtures/edge-cases", () => {
 
     expect(idsOf(findings)).toEqual(["AP-AUTH-001"]);
     expect(findings[0]?.location.function).toBe("gated_last");
+  });
+
+  it("auth_in_match_arms.rs flags only the match arm where transfer precedes auth", () => {
+    const findings = scanFixture("edge-cases/auth_in_match_arms.rs");
+    const auth = findings.filter((f) => f.id === "AP-AUTH-001");
+
+    expect(auth).toHaveLength(1);
+    expect(auth[0]?.location.function).toBe("ungated_first_arm");
+  });
+
+  it("auth_closures_and_loops.rs flags only the ungated closure transfer", () => {
+    const findings = scanFixture("edge-cases/auth_closures_and_loops.rs");
+    const auth = findings.filter((f) => f.id === "AP-AUTH-001");
+
+    expect(auth).toHaveLength(1);
+    expect(auth[0]?.location.function).toBe("batch_payout_ungated");
   });
 
   it("mixed_findings.rs lets multiple rules coexist", () => {
@@ -245,8 +269,12 @@ describe("finding quality across all fixtures", () => {
     "safe/protected_upgrade.rs",
     "safe/no_debug_statements.rs",
     "safe/auth_gated.rs",
+    "safe/receiver_form_auth.rs",
+    "safe/multi_op_and_subcontract_auth.rs",
     "edge-cases/comments_and_strings.rs",
     "edge-cases/auth_ordering.rs",
+    "edge-cases/auth_in_match_arms.rs",
+    "edge-cases/auth_closures_and_loops.rs",
     "edge-cases/mixed_findings.rs",
     "edge-cases/formatting_variants.rs",
     "edge-cases/nested_blocks.rs",
