@@ -69,12 +69,12 @@ export class AuditEngine {
     const findings: Vulnerability[] = [];
     for (const rule of this.rules()) {
       if (disabled.has(rule.id)) continue;
-      if (isFunctionRule(rule)) {
-        findings.push(...runFunctionRule(rule, code, astFunctions));
-        continue;
-      }
       if (isAstAwareRule(rule)) {
         findings.push(...rule.scanCode(code, astFunctions).map((f) => stampRuleId(rule, f)));
+        continue;
+      }
+      if (isFunctionRule(rule)) {
+        findings.push(...runFunctionRule(rule, code, astFunctions));
         continue;
       }
       findings.push(...this.runRule(rule.id, code));
