@@ -198,10 +198,29 @@ any parent, or can be given explicitly with `--config`:
 disabled_rules = ["AP-DEBUG-001"]
 min_severity = "low"          # low | medium | high | critical
 exclude = ["vendor", "generated"]
+severity_overrides = { "AP-STORAGE-001" = "medium" }
 ```
 
 Without a config file, defaults apply: all rules enabled, `min_severity =
-"low"`, no extra exclusions. Invalid values are rejected with exit code 2.
+"low"`, no extra exclusions, and no severity overrides. `severity_overrides`
+remaps the severity of specific rules after findings are aggregated and before
+`min_severity` threshold filtering, keeping JSON, SARIF, and CLI exit-code
+semantics consistent. Unknown rule IDs or invalid severity levels are rejected
+with exit code 2.
+
+### Inline suppressions
+
+Individual findings can be suppressed in source without disabling a rule
+file-wide by placing an `auditpulse-ignore <RULE-ID>` comment on the finding's
+line or the line immediately above it:
+
+```rust
+// auditpulse-ignore AP-ERROR-001
+let val = env.storage().instance().get(&KEY).unwrap();
+```
+
+Only exact rule IDs (such as `AP-AUTH-001` or `AP-ERROR-001`) are matched;
+wildcard or `all` shorthands are ignored.
 
 ## Exit codes
 

@@ -1,3 +1,5 @@
+import { renderJson } from "../src/reporting/json";
+import { renderSarif } from "../src/reporting/sarif";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 import os from "os";
@@ -223,5 +225,73 @@ describe("sortFindings", () => {
       "a.rs:10:AP-A-001",
       "b.rs:1:AP-A-001",
     ]);
+  });
+});
+
+describe("severity_overrides and inline suppressions integration (#17)", () => {
+  it("applies severity_overrides before min_severity filtering and preserves valid JSON/SARIF output", () => {
+    write(
+      "vault.rs",
+      [
+        "fn save(env: Env, k: Symbol, v: i128) {",
+        "  env.storage().persistent().set(&k, &v);",
+        "}",
+      ].join("\n"),
+    );
+
+    const downgradedConfig = {
+      ...defaultConfig(),
+      minSeverity: "medium" as const,
+      severityOverrides: {
+        "AP-STORAGE-001": "medium" as const,
+        "AP-AUTH-001": "low" as const,
+      },
+    };
+
+    const report = scanTarget(tmp, engine(), downgradedConfig);
+    // AP-AUTH-001 was downgraded to "low" (below minSeverity "medium"), so it is filtered out.
+    // AP-STORAGE-001 was downgraded from "high" to "medium", surviving with severity "medium".
+    expect(report.findings).toHaveLength(1);
+    expect(report.findings[0]?.id).toBe("AP-STORAGE-001");
+    expect(report.findings[0]?.severity).toBe("medium");
+
+    const json = JSON.parse(renderJson(report));
+    expect(json.summary.findingCount).toBe(1);
+    expect(json.summary.bySeverity).toEqual({ medium: 1 });
+    expect(json.findings[0]?.severity).toBe("medium");
+
+    const sarif = JSON.parse(
+      renderSarif(report, {
+        ruleDescriptions: new Map(
+          createDefaultRegistry().all().map((r) => [r.id, r.description]),
+        ),
+      }),
+    );
+    expect(sarif.runs[0]?.results).toHaveLength(1);
+    expect(sarif.runs[0]?.results[0]?.ruleId).toBe("AP-STORAGE-001");
+    expect(sarif.runs[0]?.results[0]?.level).toBe("warning");
+  });
+
+  it("suppresses findings with auditpulse-ignore <RULE-ID> on the same line or line above, ignoring 'all'", () => {
+    write(
+      "suppressed.rs",
+      [
+        "fn demo(env: Env, user: Address) -> i128 {",
+        "  // auditpulse-ignore AP-ERROR-001",
+        "  let a: i128 = env.storage().persistent().get(&user).unwrap();",
+        "  let b: i128 = env.storage().persistent().get(&user).unwrap(); // auditpulse-ignore AP-ERROR-001",
+        "  // auditpulse-ignore all",
+        "  let c: i128 = env.storage().persistent().get(&user).unwrap();",
+        "  env.storage().persistent().extend_ttl(&user, 100, 200);",
+        "  a",
+        "}",
+      ].join("\n"),
+    );
+
+    const report = scanTarget(tmp, engine(), defaultConfig());
+    const errorFindings = report.findings.filter((f) => f.id === "AP-ERROR-001");
+    // Lines 3 and 4 are suppressed; line 6 ('auditpulse-ignore all') is NOT suppressed.
+    expect(errorFindings).toHaveLength(1);
+    expect(errorFindings[0]?.location.line).toBe(6);
   });
 });

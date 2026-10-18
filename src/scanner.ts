@@ -131,10 +131,12 @@ function scanFile(
   // rule re-parses or re-extracts on its own. Disabled rules never run; the
   // severity threshold filters the aggregated findings.
   for (const finding of engine.run(code, { disabledRules: config.disabledRules })) {
-    if (SEVERITY_ORDER[finding.severity] < SEVERITY_ORDER[config.minSeverity]) {
+    const effectiveSeverity =
+      config.severityOverrides?.[finding.id] ?? finding.severity;
+    if (SEVERITY_ORDER[effectiveSeverity] < SEVERITY_ORDER[config.minSeverity]) {
       continue;
     }
-    findings.push({ ...finding, file: displayPath });
+    findings.push({ ...finding, severity: effectiveSeverity, file: displayPath });
   }
 
   return sortFindings(findings);

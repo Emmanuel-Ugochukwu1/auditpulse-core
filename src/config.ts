@@ -1,4 +1,4 @@
-import type { Severity } from "./types";
+import type { Severity, Vulnerability } from "./types";
 
 /**
  * Lightweight AuditPulse configuration.
@@ -8,9 +8,10 @@ import type { Severity } from "./types";
  * sensible defaults when no file exists.
  *
  * Supported keys:
- *   disabled_rules = ["AP-DEBUG-001", ...]
- *   min_severity   = "low" | "medium" | "high" | "critical"
- *   exclude        = ["node_modules", ...]  (path fragments, forward slashes)
+ *   disabled_rules     = ["AP-DEBUG-001", ...]
+ *   min_severity       = "low" | "medium" | "high" | "critical"
+ *   exclude            = ["node_modules", ...]  (path fragments, forward slashes)
+ *   severity_overrides = { "AP-STORAGE-001" = "medium", ... }
  *
  * Unknown keys are ignored. Invalid values are reported as errors rather
  * than guessed at.
@@ -22,6 +23,8 @@ export interface AuditPulseConfig {
   minSeverity: Severity;
   /** Path fragments (forward-slash separated) to skip during discovery. */
   exclude: string[];
+  /** Per-rule severity overrides applied before threshold filtering. */
+  severityOverrides: Record<string, Severity>;
 }
 
 /** Severity ranking used for both filtering and sorting. */
@@ -40,6 +43,7 @@ export function defaultConfig(): AuditPulseConfig {
     disabledRules: [],
     minSeverity: "low",
     exclude: [],
+    severityOverrides: {},
   };
 }
 
@@ -98,6 +102,9 @@ export function parseConfig(text: string): Partial<AuditPulseConfig> {
       case "min_severity":
         result.minSeverity = parseSeverity(rawValue, i + 1);
         break;
+      case "severity_overrides":
+        result.severityOverrides = parseSeverityOverrides(rawValue, i + 1);
+        break;
       default:
         // Unknown keys are ignored so the file can carry project metadata.
         break;
@@ -130,7 +137,154 @@ export function resolveConfig(
 
   config.exclude.push(...(parsed.exclude ?? []));
 
+  for (const [ruleId, severity] of Object.entries(parsed.severityOverrides ?? {})) {
+    if (!knownRuleIds.includes(ruleId)) {
+      throw new ConfigError(`Unknown rule id in severity_overrides: ${ruleId}`);
+    }
+    if (!MIN_SEVERITIES.includes(severity)) {
+      throw new ConfigError(
+        `Invalid severity in severity_overrides for ${ruleId}: ${severity}`,
+      );
+    }
+    config.severityOverrides[ruleId] = severity;
+  }
+
   return config;
+}
+
+/**
+ * Extracts per-line inline suppression directives (`auditpulse-ignore <RULE-ID>`)
+ * from Rust line or block comments. Only exact rule IDs (`AP-XXX-NNN`) are
+ * recorded; shorthand tokens like `all` are ignored.
+ */
+export function parseInlineSuppressions(code: string): Map<number, Set<string>> {
+  const map = new Map<number, Set<string>>();
+  const lines = code.split(/\r?\n/);
+
+  for (let i = 0; i < lines.length; i++) {
+    const commentText = extractCommentText(lines[i] ?? "");
+    if (!commentText.includes("auditpulse-ignore")) continue;
+
+    const directive = /auditpulse-ignore\s+([^*/\r\n]+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = directive.exec(commentText)) !== null) {
+      const tail = m[1] ?? "";
+      // Match exact rule tokens; stop before trailing explanation after "--" or ";"
+      const tokens = tail
+        .split(/[\s,]+/)
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0);
+      for (const token of tokens) {
+        if (/^AP-[A-Z]+-\d{3}$/.test(token)) {
+          const lineNo = i + 1;
+          let set = map.get(lineNo);
+          if (!set) {
+            set = new Set<string>();
+            map.set(lineNo, set);
+          }
+          set.add(token);
+        } else {
+          // Stop parsing rule tokens once non-rule prose or an invalid shorthand is hit
+          break;
+        }
+      }
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Filters out findings suppressed by an `auditpulse-ignore <RULE-ID>` comment
+ * on the finding's own line or the line immediately above it.
+ */
+export function applyInlineSuppressions<T extends Vulnerability>(
+  code: string,
+  findings: readonly T[],
+): T[] {
+  const suppressions = parseInlineSuppressions(code);
+  if (suppressions.size === 0) {
+    return [...findings];
+  }
+  return findings.filter((finding) => {
+    const line = finding.location.line;
+    if (suppressions.get(line)?.has(finding.id)) return false;
+    if (suppressions.get(line - 1)?.has(finding.id)) return false;
+    return true;
+  });
+}
+
+function extractCommentText(line: string): string {
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < line.length - 1; i++) {
+    const ch = line[i]!;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "/" && (line[i + 1] === "/" || line[i + 1] === "*")) {
+      return line.slice(i + 2);
+    }
+  }
+  return "";
+}
+
+function parseSeverityOverrides(
+  raw: string,
+  lineNo: number,
+): Record<string, Severity> {
+  if (!raw.startsWith("{") || !raw.endsWith("}")) {
+    throw new ConfigError(
+      `auditpulse.toml line ${lineNo}: expected an inline table like { "AP-STORAGE-001" = "medium" }, got: ${raw}`,
+    );
+  }
+
+  const inner = raw.slice(1, -1).trim();
+  if (inner === "") return {};
+
+  const overrides: Record<string, Severity> = {};
+  for (const part of inner.split(",")) {
+    const entry = part.trim();
+    const eq = entry.indexOf("=");
+    if (eq <= 0) {
+      throw new ConfigError(
+        `auditpulse.toml line ${lineNo}: expected "RULE_ID = \"severity\"" in severity_overrides, got: ${entry}`,
+      );
+    }
+    const rawKey = entry.slice(0, eq).trim();
+    const rawVal = entry.slice(eq + 1).trim();
+    const ruleId = stripQuotes(rawKey).trim();
+    if (!ruleId || /\s/.test(ruleId)) {
+      throw new ConfigError(
+        `auditpulse.toml line ${lineNo}: invalid rule id in severity_overrides: ${rawKey}`,
+      );
+    }
+    const valMatch = /^"([^"]*)"$/.exec(rawVal) ?? /^'([^']*)'$/.exec(rawVal);
+    if (!valMatch) {
+      throw new ConfigError(
+        `auditpulse.toml line ${lineNo}: severity override value must be a quoted string, got: ${rawVal}`,
+      );
+    }
+    const severity = valMatch[1] ?? "";
+    if (!MIN_SEVERITIES.includes(severity as Severity)) {
+      throw new ConfigError(
+        `auditpulse.toml line ${lineNo}: severity override for ${ruleId} must be one of ${MIN_SEVERITIES.join(", ")}, got: ${rawVal}`,
+      );
+    }
+    overrides[ruleId] = severity as Severity;
+  }
+
+  return overrides;
 }
 
 function parseStringArray(raw: string, lineNo: number): string[] {
@@ -170,9 +324,17 @@ function parseSeverity(raw: string, lineNo: number): Severity {
 }
 
 function stripComment(line: string): string {
-  // Quoted strings may contain '#'; only strip when # is outside quotes.
-  const inQuote = /^([^"#]*"[^"]*"[^"#]*)#/.exec(line);
-  return inQuote ? line.slice(0, inQuote[1]!.length) : line.split("#")[0]!;
+  let inDouble = false;
+  let inSingle = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!;
+    if (ch === '"' && !inSingle) inDouble = !inDouble;
+    else if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === "#" && !inDouble && !inSingle) {
+      return line.slice(0, i);
+    }
+  }
+  return line;
 }
 
 function stripQuotes(raw: string): string {
