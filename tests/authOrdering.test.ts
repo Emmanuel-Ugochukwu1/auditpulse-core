@@ -246,3 +246,66 @@ describe("AP-AUTH-001 realistic Soroban patterns", () => {
     expect(calls[0]?.location.function).toBe("no_auth");
   });
 });
+
+describe("AP-AUTH-001 shallow intra-file helper resolution (#9)", () => {
+  it("stays silent when a caller invokes a pure-auth Self::helper before the operation", () => {
+    const code = [
+      "fn authorize(env: &Env, to: &Address) {",
+      "  env.require_auth(to);",
+      "}",
+      "fn payout(env: Env, to: Address, amount: i128) {",
+      "  Self::authorize(&env, &to);",
+      "  client.transfer(&to, &amount);",
+      "}",
+    ].join("\n");
+
+    expect(MissingRequireAuthPlugin.scan(code)).toHaveLength(0);
+  });
+
+  it("resolves a pure-auth helper defined after the caller", () => {
+    const code = [
+      "fn payout(env: Env, to: Address, amount: i128) {",
+      "  check_caller(&to);",
+      "  client.transfer(&to, &amount);",
+      "}",
+      "fn check_caller(to: &Address) {",
+      "  to.require_auth();",
+      "}",
+    ].join("\n");
+
+    expect(MissingRequireAuthPlugin.scan(code)).toHaveLength(0);
+  });
+
+  it("reports when the pure-auth helper is called only after the sensitive operation", () => {
+    const code = [
+      "fn authorize(env: &Env, to: &Address) {",
+      "  env.require_auth(to);",
+      "}",
+      "fn payout(env: Env, to: Address, amount: i128) {",
+      "  client.transfer(&to, &amount);",
+      "  Self::authorize(&env, &to);",
+      "}",
+    ].join("\n");
+
+    const findings = MissingRequireAuthPlugin.scan(code);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.location.function).toBe("payout");
+  });
+
+  it("does not gate when the helper contains non-auth statements", () => {
+    const code = [
+      "fn authorize_and_log(env: &Env, to: &Address) {",
+      "  env.require_auth(to);",
+      "  let _flag = 1;",
+      "}",
+      "fn payout(env: Env, to: Address, amount: i128) {",
+      "  Self::authorize_and_log(&env, &to);",
+      "  client.transfer(&to, &amount);",
+      "}",
+    ].join("\n");
+
+    const findings = MissingRequireAuthPlugin.scan(code);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.location.function).toBe("payout");
+  });
+});

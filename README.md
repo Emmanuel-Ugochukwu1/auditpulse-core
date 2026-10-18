@@ -63,11 +63,14 @@ never any cross-file dataflow. Known consequences:
 * `AP-ARITH-001` evaluates arithmetic line-by-line; checked math in a helper
   called from another line is not connected, and complex expression chains may
   be missed. It prefers silence over noise.
-* `AP-AUTH-001` is ordering-aware within a single function: a
-  `require_auth` only gates sensitive operations that appear after it, so a
-  check placed too late still produces a finding. It does not reason across
-  functions — a `require_auth` inside a helper does not gate the caller and
-  such a helper-based boundary is reported as unprotected.
+* `AP-AUTH-001` is ordering-aware: a `require_auth` (or a call to an
+  intra-file helper whose body consists solely of `require_auth` /
+  `require_auth_for_args` checks, invoked as `helper(...)` or
+  `Self::helper(...)`) only gates sensitive operations that appear after it,
+  so a check placed too late still produces a finding. Helpers containing any
+  non-auth statements do not gate callers, argument identity passed into the
+  helper is not verified, and cross-file helpers or trait-dispatched methods
+  remain out of scope.
 * `AP-CALL-001` judges validation positionally within a single function:
   only evidence appearing before the sensitive call can gate it, and only
   explicit checks (`assert!`/`require!` or a comparison on the id) count as
