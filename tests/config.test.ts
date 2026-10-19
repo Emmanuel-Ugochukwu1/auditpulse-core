@@ -72,6 +72,45 @@ describe("parseConfig", () => {
   it("rejects unknown min_severity values", () => {
     expect(() => parseConfig('min_severity = "extreme"')).toThrow(ConfigError);
   });
+
+  it("parses [severity_overrides] section, inline tables, and dotted keys", () => {
+    const sectionToml = [
+      "[severity_overrides]",
+      '"AP-ARITH-001" = "critical"',
+      '"AP-CALL-001" = "low"',
+    ].join("\n");
+    expect(parseConfig(sectionToml)).toEqual({
+      severityOverrides: {
+        "AP-ARITH-001": "critical",
+        "AP-CALL-001": "low",
+      },
+    });
+
+    const inlineToml = 'severity_overrides = { "AP-ARITH-001" = "high", "AP-CALL-001" = "medium" }';
+    expect(parseConfig(inlineToml)).toEqual({
+      severityOverrides: {
+        "AP-ARITH-001": "high",
+        "AP-CALL-001": "medium",
+      },
+    });
+
+    const dottedToml = 'severity_overrides."AP-AUTH-001" = "medium"';
+    expect(parseConfig(dottedToml)).toEqual({
+      severityOverrides: {
+        "AP-AUTH-001": "medium",
+      },
+    });
+  });
+
+  it("rejects invalid severity values in severity_overrides", () => {
+    expect(() =>
+      parseConfig('[severity_overrides]\n"AP-ARITH-001" = "super_high"'),
+    ).toThrow(ConfigError);
+
+    expect(() =>
+      parseConfig('severity_overrides = { "AP-ARITH-001" = "invalid" }'),
+    ).toThrow(ConfigError);
+  });
 });
 
 describe("resolveConfig", () => {
@@ -82,22 +121,33 @@ describe("resolveConfig", () => {
       disabledRules: [],
       minSeverity: "low",
       exclude: [],
+      severityOverrides: {},
     });
     expect(config).toEqual(defaultConfig());
   });
 
   it("merges parsed values over defaults", () => {
-    const config = resolveConfig({ exclude: ["gen"] }, RULE_IDS);
+    const config = resolveConfig(
+      {
+        exclude: ["gen"],
+        severityOverrides: { "AP-ARITH-001": "critical" },
+      },
+      RULE_IDS,
+    );
 
     expect(config.disabledRules).toEqual([]);
     expect(config.minSeverity).toBe("low");
     expect(config.exclude).toEqual(["gen"]);
+    expect(config.severityOverrides).toEqual({ "AP-ARITH-001": "critical" });
   });
 
-  it("rejects unknown rule ids", () => {
+  it("rejects unknown rule ids in disabledRules and severityOverrides", () => {
     expect(() => resolveConfig({ disabledRules: ["AP-NOPE-001"] }, RULE_IDS)).toThrow(
-      /Unknown rule id/,
+      /Unknown rule id in configuration: AP-NOPE-001/,
     );
+    expect(() =>
+      resolveConfig({ severityOverrides: { "AP-INVALID-999": "critical" } }, RULE_IDS),
+    ).toThrow(/Unknown rule id in configuration: AP-INVALID-999/);
   });
 });
 

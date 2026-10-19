@@ -122,6 +122,9 @@ function runInit(args: string[]): number {
       '# min_severity = "low"  # low | medium | high | critical',
       '# exclude = ["vendor", "generated"]',
       "",
+      "# [severity_overrides]",
+      '# "AP-ARITH-001" = "critical"',
+      "",
     ].join("\n"),
   );
   console.log(`Created ${configPath}`);

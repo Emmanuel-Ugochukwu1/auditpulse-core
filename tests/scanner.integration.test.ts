@@ -165,6 +165,95 @@ describe("scanTarget: directory", () => {
     }
     expect(criticalOnly.findings.length).toBeLessThanOrEqual(all.findings.length);
   });
+
+  it("applies severity overrides before min_severity threshold", () => {
+    write("one.rs", VULNERABLE);
+
+    // AP-AUTH-001 defaults to "critical". Demoting it to "low" causes minSeverity: "medium" to drop it.
+    const demotedReport = scanTarget(tmp, engine(), {
+      ...defaultConfig(),
+      severityOverrides: { "AP-AUTH-001": "low" },
+      minSeverity: "medium",
+    });
+    expect(demotedReport.findings.find((f) => f.id === "AP-AUTH-001")).toBeUndefined();
+
+    // AP-AUTH-001 demoted to "low" is retained when minSeverity is "low", with the new severity applied.
+    const lowReport = scanTarget(tmp, engine(), {
+      ...defaultConfig(),
+      severityOverrides: { "AP-AUTH-001": "low" },
+      minSeverity: "low",
+    });
+    const finding = lowReport.findings.find((f) => f.id === "AP-AUTH-001");
+    expect(finding).toBeDefined();
+    expect(finding?.severity).toBe("low");
+  });
+});
+
+describe("inline suppressions", () => {
+  it("suppresses finding on the next line", () => {
+    const code = `
+      fn calc(balance: i128, amount: i128) -> i128 {
+        // auditpulse-ignore AP-ARITH-001
+        let total = balance + amount;
+        total
+      }
+    `;
+    write("calc.rs", code);
+    const report = scanTarget(tmp, engine(), defaultConfig());
+    expect(report.findings.find((f) => f.id === "AP-ARITH-001")).toBeUndefined();
+  });
+
+  it("suppresses finding on the same line", () => {
+    const code = `
+      fn calc(balance: i128, amount: i128) -> i128 {
+        let total = balance + amount; // auditpulse-ignore AP-ARITH-001
+        total
+      }
+    `;
+    write("calc.rs", code);
+    const report = scanTarget(tmp, engine(), defaultConfig());
+    expect(report.findings.find((f) => f.id === "AP-ARITH-001")).toBeUndefined();
+  });
+
+  it("does not suppress finding when directive is two lines above", () => {
+    const code = `
+      fn calc(balance: i128, amount: i128) -> i128 {
+        // auditpulse-ignore AP-ARITH-001
+
+        let total = balance + amount;
+        total
+      }
+    `;
+    write("calc.rs", code);
+    const report = scanTarget(tmp, engine(), defaultConfig());
+    expect(report.findings.find((f) => f.id === "AP-ARITH-001")).toBeDefined();
+  });
+
+  it("does not suppress when rule id does not match", () => {
+    const code = `
+      fn calc(balance: i128, amount: i128) -> i128 {
+        // auditpulse-ignore AP-AUTH-001
+        let total = balance + amount;
+        total
+      }
+    `;
+    write("calc.rs", code);
+    const report = scanTarget(tmp, engine(), defaultConfig());
+    expect(report.findings.find((f) => f.id === "AP-ARITH-001")).toBeDefined();
+  });
+
+  it("does not accept wildcard 'all' as rule id", () => {
+    const code = `
+      fn calc(balance: i128, amount: i128) -> i128 {
+        // auditpulse-ignore all
+        let total = balance + amount;
+        total
+      }
+    `;
+    write("calc.rs", code);
+    const report = scanTarget(tmp, engine(), defaultConfig());
+    expect(report.findings.find((f) => f.id === "AP-ARITH-001")).toBeDefined();
+  });
 });
 
 describe("location regression through scanTarget", () => {

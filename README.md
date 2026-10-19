@@ -198,10 +198,36 @@ any parent, or can be given explicitly with `--config`:
 disabled_rules = ["AP-DEBUG-001"]
 min_severity = "low"          # low | medium | high | critical
 exclude = ["vendor", "generated"]
+
+# Per-rule severity overrides
+[severity_overrides]
+"AP-ARITH-001" = "critical"
+"AP-CALL-001" = "low"
 ```
 
-Without a config file, defaults apply: all rules enabled, `min_severity =
-"low"`, no extra exclusions. Invalid values are rejected with exit code 2.
+Inline table syntax is also supported: `severity_overrides = { "AP-ARITH-001" = "critical" }`.
+
+Overridden severities apply before the `min_severity` threshold filter, allowing rules to be selectively promoted into or demoted out of the scan report. Unknown rule IDs or invalid severity names are rejected with exit code 2.
+
+Without a config file, defaults apply: all rules enabled, `min_severity = "low"`, no extra exclusions. Invalid values are rejected with exit code 2.
+
+### Inline Suppressions
+
+Specific findings can be suppressed directly in Rust source files using a comment directive:
+
+```rust
+// auditpulse-ignore AP-ARITH-001
+let total = a + b; // Suppressed on next line
+```
+
+The directive can also be placed on the finding line itself:
+
+```rust
+let total = a + b; // auditpulse-ignore AP-ARITH-001
+```
+
+* Suppressions require an explicit rule ID (e.g. `// auditpulse-ignore AP-ARITH-001`). Wildcards like `all` are not supported.
+* The directive only applies to findings on the same line or the line immediately following the comment.
 
 ## Exit codes
 

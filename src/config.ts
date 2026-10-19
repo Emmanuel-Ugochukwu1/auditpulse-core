@@ -22,6 +22,8 @@ export interface AuditPulseConfig {
   minSeverity: Severity;
   /** Path fragments (forward-slash separated) to skip during discovery. */
   exclude: string[];
+  /** Per-rule severity overrides, e.g. { "AP-STORAGE-001": "medium" }. */
+  severityOverrides: Record<string, Severity>;
 }
 
 /** Severity ranking used for both filtering and sorting. */
@@ -40,6 +42,7 @@ export function defaultConfig(): AuditPulseConfig {
     disabledRules: [],
     minSeverity: "low",
     exclude: [],
+    severityOverrides: {},
   };
 }
 
@@ -75,19 +78,47 @@ export function findConfigFile(
 export function parseConfig(text: string): Partial<AuditPulseConfig> {
   const result: Partial<AuditPulseConfig> = {};
   const lines = text.split(/\r?\n/);
+  let currentSection: string | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = stripComment(lines[i] ?? "").trim();
     if (line === "") continue;
 
+    if (line.startsWith("[") && line.endsWith("]")) {
+      currentSection = line.slice(1, -1).trim();
+      continue;
+    }
+
     const eq = line.indexOf("=");
     const key = eq <= 0 ? "" : line.slice(0, eq).trim();
-    if (key === "" || /\s/.test(key)) {
+    if (key === "" || (currentSection === null && /\s/.test(key))) {
       throw new ConfigError(
         `auditpulse.toml line ${i + 1}: expected "key = value", got: ${line}`,
       );
     }
     const rawValue = line.slice(eq + 1).trim();
+
+    if (currentSection === "severity_overrides") {
+      const ruleId = stripQuotes(key);
+      const sev = parseSeverityOverrideValue(rawValue, i + 1);
+      result.severityOverrides = result.severityOverrides ?? {};
+      result.severityOverrides[ruleId] = sev;
+      continue;
+    }
+
+    if (key === "severity_overrides") {
+      result.severityOverrides = parseInlineTable(rawValue, i + 1);
+      continue;
+    }
+
+    if (key.startsWith("severity_overrides.")) {
+      const ruleId = stripQuotes(key.slice("severity_overrides.".length).trim());
+      const sev = parseSeverityOverrideValue(rawValue, i + 1);
+      result.severityOverrides = result.severityOverrides ?? {};
+      result.severityOverrides[ruleId] = sev;
+      continue;
+    }
+
     switch (key) {
       case "disabled_rules":
         result.disabledRules = parseStringArray(rawValue, i + 1);
@@ -130,6 +161,13 @@ export function resolveConfig(
 
   config.exclude.push(...(parsed.exclude ?? []));
 
+  for (const [ruleId, severity] of Object.entries(parsed.severityOverrides ?? {})) {
+    if (!knownRuleIds.includes(ruleId)) {
+      throw new ConfigError(`Unknown rule id in configuration: ${ruleId}`);
+    }
+    config.severityOverrides[ruleId] = severity;
+  }
+
   return config;
 }
 
@@ -167,6 +205,43 @@ function parseSeverity(raw: string, lineNo: number): Severity {
     );
   }
   return value as Severity;
+}
+
+function parseSeverityOverrideValue(raw: string, lineNo: number): Severity {
+  const value = stripQuotes(raw);
+  if (!MIN_SEVERITIES.includes(value as Severity)) {
+    throw new ConfigError(
+      `auditpulse.toml line ${lineNo}: severity override must be one of ${MIN_SEVERITIES.join(", ")}, got: ${raw}`,
+    );
+  }
+  return value as Severity;
+}
+
+function parseInlineTable(raw: string, lineNo: number): Record<string, Severity> {
+  if (!raw.startsWith("{") || !raw.endsWith("}")) {
+    throw new ConfigError(
+      `auditpulse.toml line ${lineNo}: expected an inline table like { "RULE-ID" = "medium" }, got: ${raw}`,
+    );
+  }
+
+  const inner = raw.slice(1, -1).trim();
+  if (inner === "") return {};
+
+  const overrides: Record<string, Severity> = {};
+  for (const pair of inner.split(",")) {
+    const trimmed = pair.trim();
+    if (trimmed === "") continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) {
+      throw new ConfigError(
+        `auditpulse.toml line ${lineNo}: expected "key = value" inside table, got: ${trimmed}`,
+      );
+    }
+    const key = stripQuotes(trimmed.slice(0, eq).trim());
+    const val = parseSeverityOverrideValue(trimmed.slice(eq + 1).trim(), lineNo);
+    overrides[key] = val;
+  }
+  return overrides;
 }
 
 function stripComment(line: string): string {

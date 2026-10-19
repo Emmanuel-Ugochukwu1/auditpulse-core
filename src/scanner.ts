@@ -115,6 +115,53 @@ function toDisplayPath(target: string): string {
   return abs.split(path.sep).join("/");
 }
 
+export function parseSuppressions(code: string): Map<number, Set<string>> {
+  const map = new Map<number, Set<string>>();
+  const lines = code.split(/\r?\n/);
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const match = /\bauditpulse-ignore\s+([A-Za-z0-9_, -]+)/.exec(line);
+    if (!match) continue;
+
+    const rawIds = match[1] ?? "";
+    const ruleIds = rawIds
+      .split(/[\s,]+/)
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0);
+
+    if (ruleIds.length === 0) continue;
+
+    const currentLine = i + 1;
+    const nextLine = i + 2;
+
+    let setCurr = map.get(currentLine);
+    if (!setCurr) {
+      setCurr = new Set();
+      map.set(currentLine, setCurr);
+    }
+    for (const id of ruleIds) setCurr.add(id);
+
+    let setNext = map.get(nextLine);
+    if (!setNext) {
+      setNext = new Set();
+      map.set(nextLine, setNext);
+    }
+    for (const id of ruleIds) setNext.add(id);
+  }
+
+  return map;
+}
+
+export function isSuppressed(
+  finding: Vulnerability,
+  suppressions: Map<number, Set<string>>,
+): boolean {
+  const line = finding.location.line;
+  const set = suppressions.get(line);
+  return set !== undefined && set.has(finding.id);
+}
+
 /** Scans one file and attaches its display path to every finding. */
 function scanFile(
   root: string,
@@ -124,13 +171,22 @@ function scanFile(
   displayPath: string = relPath,
 ): FileFinding[] {
   const code = fs.readFileSync(path.join(root, relPath), "utf-8");
+  const suppressions = parseSuppressions(code);
   const findings: FileFinding[] = [];
 
   // One pass over the file: the engine parses it once (or falls back to
   // source-text extraction) and hands every rule the same structure, so no
-  // rule re-parses or re-extracts on its own. Disabled rules never run; the
-  // severity threshold filters the aggregated findings.
-  for (const finding of engine.run(code, { disabledRules: config.disabledRules })) {
+  // rule re-parses or re-extracts on its own. Disabled rules never run;
+  // inline suppressions and severity overrides are applied before minSeverity
+  // threshold filtering.
+  for (let finding of engine.run(code, { disabledRules: config.disabledRules })) {
+    if (isSuppressed(finding, suppressions)) {
+      continue;
+    }
+    const override = config.severityOverrides[finding.id];
+    if (override !== undefined) {
+      finding = { ...finding, severity: override };
+    }
     if (SEVERITY_ORDER[finding.severity] < SEVERITY_ORDER[config.minSeverity]) {
       continue;
     }
