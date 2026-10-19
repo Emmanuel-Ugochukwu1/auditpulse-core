@@ -303,6 +303,65 @@ describe("UnprotectedUpgradePlugin (AP-UPG-001)", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.location.function).toBe("set_fee");
   });
+
+  it("detects structural upgrade via BytesN<32> wasm hash write with non-conventional name", () => {
+    const code = `
+      fn commit_bytecode(env: Env, new_code_hash: BytesN<32>) {
+        env.storage().instance().set(&KEY_WASM, &new_code_hash);
+      }
+    `;
+
+    const findings = UnprotectedUpgradePlugin.scan(code);
+
+    expect(findings).toHaveLength(1);
+    expectWellFormedFinding(findings[0]!, "AP-UPG-001");
+    expect(findings[0]?.location.function).toBe("commit_bytecode");
+    expect(findings[0]?.severity).toBe("critical");
+  });
+
+  it("detects structural upgrade via deployer update_current_contract_wasm call with non-conventional name", () => {
+    const code = `
+      fn apply_patch(env: Env, code: BytesN<32>) {
+        env.deployer().update_current_contract_wasm(code);
+      }
+    `;
+
+    const findings = UnprotectedUpgradePlugin.scan(code);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.location.function).toBe("apply_patch");
+  });
+
+  it("detects structural admin reassignment via admin storage key write with non-conventional name", () => {
+    const code = `
+      fn reassign_authority(env: Env, new_authority: Address) {
+        env.storage().instance().set(&KEY_ADMIN, &new_authority);
+      }
+    `;
+
+    const findings = UnprotectedUpgradePlugin.scan(code);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.location.function).toBe("reassign_authority");
+  });
+
+  it("ignores non-conventional functions with structural signals when gated by require_auth", () => {
+    const code = `
+      fn commit_bytecode(env: Env, new_code_hash: BytesN<32>) {
+        let admin: Address = env.storage().instance().get(&KEY_ADMIN).unwrap_or_default();
+        env.require_auth(&admin);
+        env.storage().instance().set(&KEY_WASM, &new_code_hash);
+      }
+
+      fn reassign_authority(env: Env, new_authority: Address) {
+        let admin: Address = env.storage().instance().get(&KEY_ADMIN).unwrap_or_default();
+        admin.require_auth();
+        env.storage().instance().set(&KEY_ADMIN, &new_authority);
+      }
+    `;
+
+    expect(UnprotectedUpgradePlugin.scan(code)).toHaveLength(0);
+  });
 });
 
 describe("DebugStatementsPlugin (AP-DEBUG-001)", () => {

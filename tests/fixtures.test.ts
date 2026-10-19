@@ -79,6 +79,16 @@ describe("fixtures/vulnerable", () => {
     ]);
     expect(idsOf(findings)).toContain("AP-CALL-001");
   });
+  it("structural_unprotected_upgrade.rs triggers AP-UPG-001 on non-conventionally named functions", () => {
+    const findings = scanFixture("vulnerable/structural_unprotected_upgrade.rs");
+    const upgrades = findings.filter((f) => f.id === "AP-UPG-001");
+
+    expect(upgrades).toHaveLength(2);
+    expect(upgrades.map((f) => f.location.function).sort()).toEqual([
+      "commit_bytecode",
+      "reassign_authority",
+    ]);
+  });
 });
 
 describe("fixtures/safe", () => {
@@ -100,6 +110,10 @@ describe("fixtures/safe", () => {
 
   it("auth_gated.rs produces no findings", () => {
     expect(idsOf(scanFixture("safe/auth_gated.rs"))).toEqual([]);
+  });
+
+  it("structural_protected_upgrade.rs produces no findings", () => {
+    expect(idsOf(scanFixture("safe/structural_protected_upgrade.rs"))).toEqual([]);
   });
 });
 
@@ -238,11 +252,13 @@ describe("finding quality across all fixtures", () => {
     "vulnerable/unchecked_arithmetic.rs",
     "vulnerable/unvalidated_external_call.rs",
     "vulnerable/unprotected_upgrade.rs",
+    "vulnerable/structural_unprotected_upgrade.rs",
     "vulnerable/debug_statements.rs",
     "vulnerable/auth_after_operation.rs",
     "safe/checked_arithmetic.rs",
     "safe/validated_external_call.rs",
     "safe/protected_upgrade.rs",
+    "safe/structural_protected_upgrade.rs",
     "safe/no_debug_statements.rs",
     "safe/auth_gated.rs",
     "edge-cases/comments_and_strings.rs",

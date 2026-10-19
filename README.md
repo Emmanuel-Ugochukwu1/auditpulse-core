@@ -9,7 +9,7 @@ Lightweight static analysis security scanner for Soroban (Stellar) smart contrac
 * **`missingExtendTtl`** (`AP-STORAGE-001`): Identifies persistent or temporary ledger storage access that lacks an accompanying `.extend_ttl()` call, preventing silent data expiry.
 * **`uncheckedArithmetic`** (`AP-ARITH-001`): Flags add/subtract/multiply/divide on amount-like values (amounts, balances, supplies, fees) with no checked math (`checked_add`, `saturating_sub`, bounds) that can overflow, underflow, or divide by zero.
 * **`unvalidatedExternalCall`** (`AP-CALL-001`): Flags cross-contract/token operations (transfers, burns, mints, admin changes) with no `require_auth` and no evidence-backed validation: an explicitly checked id (`assert!`/`require!`/comparison) before the call suppresses the finding, an unchecked user-supplied `*_id` argument is reported (medium confidence — naming alone is not a boundary), and a storage-resolved id target is reported at low confidence.
-* **`unprotectedUpgrade`** (`AP-UPG-001`): Flags upgrade/migration/admin-configuration functions (recognized by name) that contain no `require_auth` or admin check.
+* **`unprotectedUpgrade`** (`AP-UPG-001`): Flags upgrade/migration/admin-configuration functions (recognized by name and structural upgrade/storage signals) that contain no `require_auth` or admin check.
 * **`debugStatements`** (`AP-DEBUG-001`): Flags debug/development-only macros (`log!`, `dbg!`, `println!`, `print!`, `eprint(ln)!`) left in production contract code.
 
 ### Severity and confidence
@@ -76,8 +76,10 @@ never any cross-file dataflow. Known consequences:
   `try_*` results, `.unwrap()`/`panic!`, or a bare rename are never treated
   as validation. This is structural AST reasoning, not semantic or
   interprocedural data flow.
-* `AP-UPG-001` recognizes admin/upgrade functions by name, so unusual naming
-  can evade it.
+* `AP-UPG-001` recognizes admin/upgrade functions by name conventions as well as
+  structural signals (writes of `BytesN<32>` wasm hashes, writes to admin/upgrade
+  storage keys, or direct contract upgrade calls). However, highly obfuscated
+  wrapper patterns without conventional names or structural storage cues may still evade it.
 * Directory scans evaluate each Rust file independently; there is no
   cross-file dataflow analysis.
 
