@@ -3,7 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { renderJson } from "../src/reporting/json";
-import { renderSarif } from "../src/reporting/sarif";
+import { renderSarif, computeLineHash } from "../src/reporting/sarif";
 import { renderHuman } from "../src/reporting/human";
 import type { FileFinding } from "../src/scanner";
 import type { ScanReport } from "../src/scanner";
@@ -198,6 +198,110 @@ describe("SARIF output", () => {
       "AP-DEBUG-001",
     ]);
     expect(renderSarif(report(findings), { ruleDescriptions })).toBe(text);
+  });
+
+  it("enriches rules with helpUri and properties (tags and precision)", () => {
+    const log = JSON.parse(
+      renderSarif(
+        report([
+          finding({ id: "AP-AUTH-001", confidence: "high", file: "a.rs" }),
+          finding({ id: "AP-DEBUG-001", confidence: "low", file: "b.rs" }),
+        ]),
+        { ruleDescriptions },
+      ),
+    ) as any;
+
+    const rules = log.runs[0].tool.driver.rules;
+    const authRule = rules.find((r: any) => r.id === "AP-AUTH-001");
+    expect(authRule).toBeDefined();
+    expect(authRule.helpUri).toBe(
+      "https://github.com/Emmanuel-Ugochukwu1/auditpulse-core#ap-auth-001",
+    );
+    expect(authRule.properties.tags).toEqual(["security", "soroban"]);
+    expect(authRule.properties.precision).toBe("high");
+
+    const debugRule = rules.find((r: any) => r.id === "AP-DEBUG-001");
+    expect(debugRule).toBeDefined();
+    expect(debugRule.helpUri).toBe(
+      "https://github.com/Emmanuel-Ugochukwu1/auditpulse-core#ap-debug-001",
+    );
+    expect(debugRule.properties.precision).toBe("low");
+  });
+
+  it("maps finding confidence to precision in result properties", () => {
+    const log = JSON.parse(
+      renderSarif(
+        report([
+          finding({
+            id: "AP-AUTH-001",
+            confidence: "medium",
+            remediation: "fix it",
+            file: "a.rs",
+          }),
+        ]),
+        { ruleDescriptions },
+      ),
+    ) as any;
+
+    const result = log.runs[0].results[0];
+    expect(result.properties.precision).toBe("medium");
+    expect(result.properties.remediation).toBe("fix it");
+  });
+
+  it("generates deterministic partialFingerprints across repeated runs and platforms", () => {
+    const findingA = finding({
+      id: "AP-AUTH-001",
+      message: "critical operation is not gated",
+      file: "contracts\\vault.rs",
+      location: { line: 10 },
+    });
+    const findingB = finding({
+      id: "AP-AUTH-001",
+      message: "critical operation is not gated",
+      file: "contracts/vault.rs",
+      location: { line: 99 },
+    });
+
+    const hashA = computeLineHash(findingA);
+    const hashB = computeLineHash(findingB);
+    expect(hashA).toBe(hashB);
+    expect(hashA).toMatch(/^[0-9a-f]{64}$/);
+
+    const log = JSON.parse(
+      renderSarif(report([findingA]), { ruleDescriptions }),
+    ) as any;
+    expect(
+      log.runs[0].results[0].partialFingerprints.primaryLocationLineHash,
+    ).toBe(hashA);
+  });
+
+  it("emits automationDetails with tool version and supports overrides", () => {
+    const defaultLog = JSON.parse(
+      renderSarif(report([finding({ file: "a.rs" })]), { ruleDescriptions }),
+    ) as any;
+
+    expect(defaultLog.runs[0].automationDetails).toBeDefined();
+    expect(defaultLog.runs[0].automationDetails.id).toBe("auditpulse/2.0.0");
+    expect(defaultLog.runs[0].automationDetails.description.text).toContain(
+      "2.0.0",
+    );
+
+    const customLog = JSON.parse(
+      renderSarif(report([finding({ file: "a.rs" })]), {
+        ruleDescriptions,
+        ruleHelpUris: new Map([
+          ["AP-AUTH-001", "https://example.com/rules/auth"],
+        ]),
+        automationId: "custom-pipeline/nightly",
+      }),
+    ) as any;
+
+    expect(customLog.runs[0].automationDetails.id).toBe(
+      "custom-pipeline/nightly",
+    );
+    expect(customLog.runs[0].tool.driver.rules[0].helpUri).toBe(
+      "https://example.com/rules/auth",
+    );
   });
 });
 

@@ -184,10 +184,10 @@ omitted when the rule does not provide them.
 node dist/index.js sarif contracts/SampleVault.rs > auditpulse.sarif
 ```
 
-Emits SARIF 2.1.0 with the tool driver, rule metadata (ids, descriptions,
-levels) and one result per finding with file URI and start line (plus start
-column when the rule verified it), ready for
-upload to GitHub Code Scanning.
+Emits SARIF 2.1.0 with enriched metadata ready for upload to GitHub Code Scanning:
+- **Rule metadata**: Rule ids, descriptions, default levels, `helpUri` documentation anchors, and `properties` (`tags: ["security", "soroban"]` and `precision`).
+- **Results**: File URI, start line (plus start column when verified), remediation guidance, result `precision` derived from finding confidence, and deterministic `partialFingerprints.primaryLocationLineHash` for stable alert tracking across code shifts.
+- **Run metadata**: `automationDetails` carrying tool identity and version to differentiate scan runs.
 
 ## Configuration
 
