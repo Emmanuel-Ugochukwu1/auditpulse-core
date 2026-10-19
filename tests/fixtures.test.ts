@@ -101,6 +101,10 @@ describe("fixtures/safe", () => {
   it("auth_gated.rs produces no findings", () => {
     expect(idsOf(scanFixture("safe/auth_gated.rs"))).toEqual([]);
   });
+
+  it("helper_auth_gated.rs produces no findings", () => {
+    expect(idsOf(scanFixture("safe/helper_auth_gated.rs"))).toEqual([]);
+  });
 });
 
 describe("fixtures/edge-cases", () => {
@@ -245,6 +249,7 @@ describe("finding quality across all fixtures", () => {
     "safe/protected_upgrade.rs",
     "safe/no_debug_statements.rs",
     "safe/auth_gated.rs",
+    "safe/helper_auth_gated.rs",
     "edge-cases/comments_and_strings.rs",
     "edge-cases/auth_ordering.rs",
     "edge-cases/mixed_findings.rs",

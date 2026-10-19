@@ -12,6 +12,67 @@ const SENSITIVE_OP =
 /** An explicit authorization check inside the function body. */
 const AUTH_CHECK = /require_auth(?:_for_args)?\s*\(/;
 
+/**
+ * A statement consisting purely of an authorization check.
+ * Handles `env.require_auth(...)`, `account.require_auth()`,
+ * `env.require_auth_for_args(...)`, etc.
+ */
+const AUTH_STMT_REGEX =
+  /^(?:[A-Za-z_]\w*\.)?require_auth(?:_for_args)?\s*\([^;]*\)$/;
+
+/**
+ * Determines whether a function body consists solely of authorization checks.
+ * Returns true if the function has at least one auth check and no non-auth statements.
+ */
+export function isAuthHelper(fn: ScannedFunction): boolean {
+  const clean = sanitizeKeepLines(fn.body);
+  const openBrace = clean.indexOf("{");
+  const closeBrace = clean.lastIndexOf("}");
+  if (openBrace < 0 || closeBrace <= openBrace) {
+    return false;
+  }
+
+  const inner = clean.slice(openBrace + 1, closeBrace).trim();
+  if (!inner || !AUTH_CHECK.test(inner)) {
+    return false;
+  }
+
+  // Statements separated by semicolon
+  const statements = inner
+    .split(";")
+    .map((s) => s.replace(/\s+/g, " ").trim())
+    .filter((s) => s.length > 0);
+
+  if (statements.length === 0) {
+    return false;
+  }
+
+  for (const stmt of statements) {
+    if (!AUTH_STMT_REGEX.test(stmt)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Finds the earliest invocation of an intra-file auth helper function.
+ * Matches `Self::helper(` or `helper(`.
+ */
+function findFirstHelperAuthCall(
+  body: string,
+  authHelpers: readonly string[],
+): number | null {
+  if (authHelpers.length === 0) {
+    return null;
+  }
+  const escaped = authHelpers.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(`\\b(?:Self::)?(?:${escaped.join("|")})\\s*\\(`, "g");
+  const match = pattern.exec(body);
+  return match ? match.index : null;
+}
+
 export class MissingRequireAuthPlugin implements Rule, FunctionRule {
   id = "AP-AUTH-001";
   name = "Missing Require Auth";
@@ -19,9 +80,8 @@ export class MissingRequireAuthPlugin implements Rule, FunctionRule {
     "Detects authorization-sensitive operations (token transfers, balance updates, ledger entry writes) in functions that never call env.require_auth()";
 
   scan(code: string): Vulnerability[] {
-    return extractRustFunctions(sanitizeKeepLines(code)).flatMap((fn) =>
-      this.scanFunction(fn),
-    );
+    const fns = extractRustFunctions(sanitizeKeepLines(code));
+    return fns.flatMap((fn) => this.scanFunction(fn, fns));
   }
 
   /**
@@ -30,15 +90,14 @@ export class MissingRequireAuthPlugin implements Rule, FunctionRule {
    *
    * Ordering matters: an auth check only gates operations that execute
    * after it. When the first sensitive operation appears before the first
-   * require_auth in the body, the operation runs unauthorized and the
-   * finding survives. A trailing require_auth does not retroactively gate
-   * it. This is a positional heuristic over the function body (AST-bounded
-   * when available): it cannot tie an auth call to specific arguments, and
-   * it does not reason about helper functions — a require_auth inside a
-   * callee is invisible here, which is documented as a limitation rather
-   * than guessed at.
+   * require_auth (or intra-file auth helper call) in the body, the operation
+   * runs unauthorized and the finding survives. A trailing check does not
+   * retroactively gate it.
    */
-  scanFunction(fn: ScannedFunction): Vulnerability[] {
+  scanFunction(
+    fn: ScannedFunction,
+    allFunctions?: readonly ScannedFunction[],
+  ): Vulnerability[] {
     const clean = sanitizeKeepLines(fn.body);
     const brace = clean.indexOf("{");
     const body = brace >= 0 ? clean.slice(brace) : clean;
@@ -49,7 +108,16 @@ export class MissingRequireAuthPlugin implements Rule, FunctionRule {
     }
 
     const auth = AUTH_CHECK.exec(body);
-    if (auth && auth.index < sensitive.index) {
+    const directAuthIndex = auth ? auth.index : Infinity;
+
+    const authHelpers = (allFunctions ?? [])
+      .filter((f) => f.name !== fn.name && isAuthHelper(f))
+      .map((f) => f.name);
+
+    const helperAuthIndex = findFirstHelperAuthCall(body, authHelpers) ?? Infinity;
+
+    const earliestAuthIndex = Math.min(directAuthIndex, helperAuthIndex);
+    if (earliestAuthIndex < sensitive.index) {
       return [];
     }
 

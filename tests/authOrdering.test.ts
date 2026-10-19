@@ -219,6 +219,73 @@ describe("AP-AUTH-001 realistic Soroban patterns", () => {
     expect(MissingRequireAuthPlugin.scan(code)).toHaveLength(0);
   });
 
+  it("caller stays silent when gated by an intra-file pure auth helper", () => {
+    const code = [
+      "fn payout(env: Env, to: Address, amount: i128) {",
+      "  Self::authorize(&env, &to);",
+      "  client.transfer(&to, &amount);",
+      "}",
+      "",
+      "fn authorize(env: &Env, to: &Address) {",
+      "  env.require_auth(to);",
+      "}",
+    ].join("\n");
+
+    const findings = MissingRequireAuthPlugin.scan(code);
+    expect(findings).toHaveLength(0);
+  });
+
+  it("auth helper works when defined after its usage in the caller", () => {
+    const code = [
+      "fn withdraw(env: Env, user: Address, amount: i128) {",
+      "  check_auth(&user);",
+      "  client.burn(&user, &amount);",
+      "}",
+      "",
+      "fn check_auth(user: &Address) {",
+      "  user.require_auth();",
+      "}",
+    ].join("\n");
+
+    const findings = MissingRequireAuthPlugin.scan(code);
+    expect(findings).toHaveLength(0);
+  });
+
+  it("helper containing non-auth statements does not gate the caller", () => {
+    const code = [
+      "fn payout(env: Env, to: Address, amount: i128) {",
+      "  Self::authorize_impure(&env, &to);",
+      "  client.transfer(&to, &amount);",
+      "}",
+      "",
+      "fn authorize_impure(env: &Env, to: &Address) {",
+      "  let note = 1;",
+      "  env.require_auth(to);",
+      "}",
+    ].join("\n");
+
+    const findings = MissingRequireAuthPlugin.scan(code);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.location.function).toBe("payout");
+  });
+
+  it("helper called after the sensitive operation does not retroactively gate it", () => {
+    const code = [
+      "fn payout(env: Env, to: Address, amount: i128) {",
+      "  client.transfer(&to, &amount);",
+      "  Self::authorize(&env, &to);",
+      "}",
+      "",
+      "fn authorize(env: &Env, to: &Address) {",
+      "  env.require_auth(to);",
+      "}",
+    ].join("\n");
+
+    const findings = MissingRequireAuthPlugin.scan(code);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.location.function).toBe("payout");
+  });
+
   it("fixtures: safe auth-gated file stays clean, vulnerable file reports precisely", () => {
     const safe = fs.readFileSync(
       path.join(ROOT, "fixtures", "safe", "auth_gated.rs"),

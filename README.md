@@ -64,10 +64,11 @@ never any cross-file dataflow. Known consequences:
   called from another line is not connected, and complex expression chains may
   be missed. It prefers silence over noise.
 * `AP-AUTH-001` is ordering-aware within a single function: a
-  `require_auth` only gates sensitive operations that appear after it, so a
-  check placed too late still produces a finding. It does not reason across
-  functions — a `require_auth` inside a helper does not gate the caller and
-  such a helper-based boundary is reported as unprotected.
+  `require_auth` (or an invocation of an intra-file pure auth helper) only
+  gates sensitive operations that appear after it, so a check placed too late
+  still produces a finding. Intra-file helpers whose bodies consist solely of
+  auth checks are recognized, but cross-file helpers, trait methods, and
+  fine-grained argument identity tracking remain out of scope.
 * `AP-CALL-001` judges validation positionally within a single function:
   only evidence appearing before the sensitive call can gate it, and only
   explicit checks (`assert!`/`require!` or a comparison on the id) count as
