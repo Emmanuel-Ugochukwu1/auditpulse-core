@@ -309,6 +309,8 @@ acceptance criteria. These are maintainer-planned items derived from the
 codebase itself — new rule candidates, fixture coverage, configuration, and
 reporting enhancements.
 
+* Contributor guide: [CONTRIBUTING.md](CONTRIBUTING.md)
+* Rule authoring guide: [docs/writing-a-rule.md](docs/writing-a-rule.md)
 * Issue tracker: <https://github.com/Emmanuel-Ugochukwu1/auditpulse-core/issues>
 * Roadmap overview: `docs/ROADMAP_ISSUES.md`
 * Issues labeled `good first issue` are scoped for a first contribution
@@ -321,11 +323,17 @@ run; it skips titles that already exist, so it never creates duplicates).
 
 Built with TypeScript: Tree-sitter provides function structure, source-text pattern rules perform the checks, and Vitest tests it all.
 
+All changes must pass the three gating commands:
+
 ```bash
-# Type check
-npx tsc --noEmit
+# 1. Type check
+npm run typecheck
 
-# Run unit tests
+# 2. Build distribution
+npm run build
+
+# 3. Run unit and integration tests
 npm test
-
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines, rule architecture, and fixture conventions.
