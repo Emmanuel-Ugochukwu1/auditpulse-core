@@ -101,6 +101,18 @@ describe("fixtures/safe", () => {
   it("auth_gated.rs produces no findings", () => {
     expect(idsOf(scanFixture("safe/auth_gated.rs"))).toEqual([]);
   });
+
+  it("receiver_auth_nested_loops.rs produces no findings", () => {
+    expect(idsOf(scanFixture("safe/receiver_auth_nested_loops.rs"))).toEqual([]);
+  });
+
+  it("multi_op_single_auth.rs produces no findings", () => {
+    expect(idsOf(scanFixture("safe/multi_op_single_auth.rs"))).toEqual([]);
+  });
+
+  it("subcontract_and_token_calls.rs produces no findings", () => {
+    expect(idsOf(scanFixture("safe/subcontract_and_token_calls.rs"))).toEqual([]);
+  });
 });
 
 describe("fixtures/edge-cases", () => {
@@ -220,6 +232,21 @@ describe("fixtures/edge-cases", () => {
     expect(ids).not.toContain("AP-UPG-001");
     expect(ids).not.toContain("AP-ERROR-001");
   });
+
+  it("match_arm_and_closure_auth.rs flags only the ungated closure operation", () => {
+    const findings = scanFixture("edge-cases/match_arm_and_closure_auth.rs");
+    const auth = findings.filter((f) => f.id === "AP-AUTH-001");
+
+    expect(auth).toHaveLength(1);
+    expect(auth[0]?.location.function).toBe("closure_ungated");
+
+    // The ungated closure also reports an unvalidated external call
+    expect(idsOf(findings)).toContain("AP-CALL-001");
+
+    // branch_auth and closure_gated are authorized and produce zero findings
+    expect(findings.filter((f) => f.location.function === "branch_auth")).toHaveLength(0);
+    expect(findings.filter((f) => f.location.function === "closure_gated")).toHaveLength(0);
+  });
 });
 
 describe("fixtures/workspaces", () => {
@@ -245,12 +272,16 @@ describe("finding quality across all fixtures", () => {
     "safe/protected_upgrade.rs",
     "safe/no_debug_statements.rs",
     "safe/auth_gated.rs",
+    "safe/receiver_auth_nested_loops.rs",
+    "safe/multi_op_single_auth.rs",
+    "safe/subcontract_and_token_calls.rs",
     "edge-cases/comments_and_strings.rs",
     "edge-cases/auth_ordering.rs",
     "edge-cases/mixed_findings.rs",
     "edge-cases/formatting_variants.rs",
     "edge-cases/nested_blocks.rs",
     "edge-cases/structural_ast.rs",
+    "edge-cases/match_arm_and_closure_auth.rs",
     "workspaces/vault-set/vault-core.rs",
     "workspaces/vault-set/vault-host.rs",
   ];
