@@ -182,12 +182,14 @@ omitted when the rule does not provide them.
 
 ```bash
 node dist/index.js sarif contracts/SampleVault.rs > auditpulse.sarif
+# or scan sample contracts for CI/CD pipeline integration:
+node dist/index.js scan contracts/TtlStorageCi.rs --format sarif
 ```
 
 Emits SARIF 2.1.0 with the tool driver, rule metadata (ids, descriptions,
 levels) and one result per finding with file URI and start line (plus start
 column when the rule verified it), ready for
-upload to GitHub Code Scanning.
+upload to GitHub Code Scanning or CI/CD pipelines.
 
 ## Configuration
 
