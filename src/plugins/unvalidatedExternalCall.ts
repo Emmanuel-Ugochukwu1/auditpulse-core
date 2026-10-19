@@ -1,6 +1,6 @@
 import type { Rule, ScannedFunction, Vulnerability } from "../types";
 import type { FunctionRule } from "../engine.js";
-import { extractRustFunctions, functionLocation, sanitizeKeepLines } from "../utils/rust.js";
+import { extractRustFunctions, findExpressionLocation, functionLocation, sanitizeKeepLines } from "../utils/rust.js";
 
 /**
  * AP-CALL-001 — flags cross-contract / external invocations that perform a
@@ -114,24 +114,35 @@ export class UnvalidatedExternalCallPlugin implements Rule, FunctionRule {
         (s) => s.offset < call.offset && s.usesBefore(call, body),
       );
       if (storageBefore !== undefined) {
-        return [finding(fn, STORAGE_TIER, storageBefore.name)];
+        return [finding(fn, STORAGE_TIER, storageBefore.name, call.offset)];
       }
       if (paramIds.length > 0) {
-        return [finding(fn, USER_SUPPLIED_TIER, paramIds[0])];
+        return [finding(fn, USER_SUPPLIED_TIER, paramIds[0], call.offset)];
       }
-      return [finding(fn, PLAIN_TIER)];
+      return [finding(fn, PLAIN_TIER, undefined, call.offset)];
     }
     return [];
   }
 }
 
-function finding(fn: ScannedFunction, tier: Tier, id?: string): Vulnerability {
+function finding(fn: ScannedFunction, tier: Tier, id?: string, callOffset?: number): Vulnerability {
+  let location = functionLocation(fn);
+  if (callOffset !== undefined) {
+    const exprLoc = findExpressionLocation(fn, callOffset);
+    if (exprLoc !== null) {
+      location = {
+        line: exprLoc.line,
+        column: exprLoc.column,
+        function: fn.name,
+      };
+    }
+  }
   return {
     id: "AP-CALL-001",
     message: tier.message(fn.name, id),
     severity: "high",
     confidence: tier.confidence,
-    location: functionLocation(fn),
+    location,
     remediation:
       "Validate the external contract address and its returned values, and gate the operation with env.require_auth(&...), so only authorized parties can trigger the cross-contract interaction.",
   };

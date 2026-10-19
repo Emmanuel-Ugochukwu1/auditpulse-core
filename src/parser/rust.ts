@@ -1,5 +1,6 @@
 import { createRequire } from "module";
 import type { ScannedFunction } from "../types";
+import { sanitizeKeepLines } from "../utils/rust.js";
 
 /**
  * Isolated Tree-sitter Rust parser (AP-005).
@@ -126,5 +127,87 @@ function toAstFunction(node: import("tree-sitter").SyntaxNode): ScannedFunction 
     bodyInner: open >= 0 ? body.slice(open + 1) : "",
     bodyLine,
     bodyColumn: bodyNode.startPosition.column + 1,
+  };
+}
+
+export interface FindExpressionOptions {
+  /**
+   * Whether to blank out comments and string literals with equivalent whitespace
+   * before matching, so that commented-out code or string contents do not produce
+   * false or ambiguous matches. Defaults to true.
+   */
+  sanitize?: boolean;
+}
+
+/**
+ * Maps an expression, needle pattern, or character offset inside a function's
+ * body (`fn.bodyInner`) to a 1-based source location `{ line, column }`.
+ *
+ * Requirements & design rules:
+ * - If `fn.bodyColumn === undefined` (text-fallback extraction without AST coordinates),
+ *   always returns `null` to avoid inventing pseudo-precise columns.
+ * - If `target` is a string or RegExp, comments and strings are sanitized by default
+ *   so that comments/string literals do not interfere.
+ * - If `target` matches multiple times (ambiguous) or zero times, returns `null`
+ *   to avoid misattributing the finding to the wrong expression.
+ * - If `target` is a numeric offset, directly maps that offset in `fn.bodyInner`
+ *   to 1-based `{ line, column }`.
+ */
+export function findExpressionLocation(
+  fn: ScannedFunction,
+  target: string | RegExp | number,
+  options?: FindExpressionOptions,
+): { line: number; column: number } | null {
+  if (fn.bodyColumn === undefined) {
+    return null;
+  }
+
+  let offset: number;
+
+  if (typeof target === "number") {
+    if (target < 0 || target > fn.bodyInner.length || !Number.isFinite(target)) {
+      return null;
+    }
+    offset = Math.floor(target);
+  } else {
+    const text = options?.sanitize === false ? fn.bodyInner : sanitizeKeepLines(fn.bodyInner);
+
+    if (typeof target === "string") {
+      if (target.length === 0) {
+        return null;
+      }
+      const first = text.indexOf(target);
+      if (first === -1) {
+        return null;
+      }
+      const second = text.indexOf(target, first + 1);
+      if (second !== -1) {
+        return null; // Ambiguous: multiple matches
+      }
+      offset = first;
+    } else {
+      const flags = target.flags.includes("g") ? target.flags : `${target.flags}g`;
+      const regex = new RegExp(target.source, flags);
+      const matches = [...text.matchAll(regex)];
+      if (matches.length !== 1 || matches[0].index === undefined) {
+        return null; // Zero or multiple matches
+      }
+      offset = matches[0].index;
+    }
+  }
+
+  const prefix = fn.bodyInner.slice(0, offset);
+  const lines = prefix.split("\n");
+
+  if (lines.length === 1) {
+    return {
+      line: fn.bodyLine,
+      column: fn.bodyColumn + 1 + offset,
+    };
+  }
+
+  return {
+    line: fn.bodyLine + lines.length - 1,
+    column: lines[lines.length - 1]!.length + 1,
   };
 }

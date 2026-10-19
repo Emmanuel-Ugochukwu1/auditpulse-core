@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseRust, extractFunctions } from "../src/parser/rust";
+import { parseRust, extractFunctions, findExpressionLocation } from "../src/parser/rust";
+import type { ScannedFunction } from "../src/types";
 
 describe("parseRust", () => {
   it("parses valid Rust without syntax errors", () => {
@@ -211,5 +212,111 @@ describe("extractFunctions", () => {
     expect(fn.column).toBe(1);
     expect(fn.bodyLine).toBe(4); // the line holding the opening brace
     expect(fn.endLine).toBe(6);
+  });
+});
+
+describe("findExpressionLocation", () => {
+  it("locates an expression on the same line as the opening brace", () => {
+    const code = "fn helper(x: i128) -> i128 { x + 1 }";
+    const fn = extractFunctions(parseRust(code)!.tree)[0]!;
+
+    const loc = findExpressionLocation(fn, "x + 1");
+    expect(loc).toEqual({ line: 1, column: 30 });
+  });
+
+  it("locates an expression across subsequent lines in multi-line bodies", () => {
+    const code = [
+      "fn transfer_funds(env: Env) {", // 1
+      "  let target = 42;",            // 2
+      "  client.transfer(&target);",    // 3
+      "}",                             // 4
+    ].join("\n");
+    const fn = extractFunctions(parseRust(code)!.tree)[0]!;
+
+    const loc = findExpressionLocation(fn, "client.transfer");
+    expect(loc).toEqual({ line: 3, column: 3 });
+  });
+
+  it("locates expressions using RegExp patterns", () => {
+    const code = [
+      "fn work() {",
+      "  let amount = 100;",
+      "  let balance = amount * 2;",
+      "}",
+    ].join("\n");
+    const fn = extractFunctions(parseRust(code)!.tree)[0]!;
+
+    const loc = findExpressionLocation(fn, /amount\s*\*\s*2/);
+    expect(loc).toEqual({ line: 3, column: 17 });
+  });
+
+  it("locates by explicit numeric offset within fn.bodyInner", () => {
+    const code = "fn one_line() { 12345 }";
+    const fn = extractFunctions(parseRust(code)!.tree)[0]!;
+
+    // " 12345 }" -> offset 1 is "1"
+    const loc = findExpressionLocation(fn, 1);
+    expect(loc).toEqual({ line: 1, column: 17 });
+  });
+
+  it("ignores occurrences inside comments and strings by default", () => {
+    const code = [
+      "fn guarded() {",
+      "  // client.transfer(&comment);",
+      "  let s = \"client.transfer(&string)\";",
+      "  client.transfer(&real);",
+      "}",
+    ].join("\n");
+    const fn = extractFunctions(parseRust(code)!.tree)[0]!;
+
+    // Because comments and strings are blanked out with equivalent whitespace,
+    // the only matching occurrence is on line 4, so it is unambiguous.
+    const loc = findExpressionLocation(fn, "client.transfer");
+    expect(loc).toEqual({ line: 4, column: 3 });
+  });
+
+  it("returns null on ambiguous multiple matches", () => {
+    const code = [
+      "fn double_call() {",
+      "  client.transfer(&first);",
+      "  client.transfer(&second);",
+      "}",
+    ].join("\n");
+    const fn = extractFunctions(parseRust(code)!.tree)[0]!;
+
+    expect(findExpressionLocation(fn, "client.transfer")).toBeNull();
+  });
+
+  it("returns null when expression is not found or empty", () => {
+    const code = "fn empty() { let a = 1; }";
+    const fn = extractFunctions(parseRust(code)!.tree)[0]!;
+
+    expect(findExpressionLocation(fn, "nonexistent")).toBeNull();
+    expect(findExpressionLocation(fn, "")).toBeNull();
+  });
+
+  it("returns null when fn.bodyColumn is undefined (text-fallback extraction)", () => {
+    const fn: ScannedFunction = {
+      name: "fallback_fn",
+      line: 1,
+      endLine: 3,
+      body: "fn fallback_fn() {\n  call();\n}",
+      bodyInner: "\n  call();\n}",
+      bodyLine: 1,
+      // bodyColumn is intentionally omitted
+    };
+
+    expect(findExpressionLocation(fn, "call()")).toBeNull();
+    expect(findExpressionLocation(fn, 4)).toBeNull();
+  });
+
+  it("returns null for negative, infinite, or out-of-bounds numeric offsets", () => {
+    const code = "fn small() { 1 }";
+    const fn = extractFunctions(parseRust(code)!.tree)[0]!;
+
+    expect(findExpressionLocation(fn, -1)).toBeNull();
+    expect(findExpressionLocation(fn, 9999)).toBeNull();
+    expect(findExpressionLocation(fn, Number.NaN)).toBeNull();
+    expect(findExpressionLocation(fn, Number.POSITIVE_INFINITY)).toBeNull();
   });
 });

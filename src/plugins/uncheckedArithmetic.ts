@@ -1,6 +1,6 @@
 import type { Rule, ScannedFunction, Vulnerability } from "../types";
 import type { FunctionRule } from "../engine.js";
-import { extractRustFunctions, functionLocation, sanitizeKeepLines } from "../utils/rust.js";
+import { extractRustFunctions, findExpressionLocation, functionLocation, sanitizeKeepLines } from "../utils/rust.js";
 
 /** Amount-like identifiers that may be attacker- or contract-relevant. */
 const AMOUNT_IDENTIFIER =
@@ -51,14 +51,23 @@ export class UncheckedArithmeticPlugin implements Rule, FunctionRule {
     const bodyLines = (open >= 0 ? clean.slice(open + 1) : clean).split("\n");
 
     const findings: Vulnerability[] = [];
+    let lineStartOffset = 0;
     for (let i = 0; i < bodyLines.length; i++) {
       const line = bodyLines[i] ?? "";
       if (!AMOUNT_IDENTIFIER.test(line) || !BINARY_ARITH.test(line)) {
+        lineStartOffset += line.length + 1;
         continue;
       }
       if (GUARDED_MATH.test(line)) {
+        lineStartOffset += line.length + 1;
         continue;
       }
+
+      const match = BINARY_ARITH.exec(line);
+      const opRel = match ? match[0].search(/[+\-*/]/) : -1;
+      const opInLine = match && opRel >= 0 ? match.index + opRel : (match?.index ?? 0);
+      const exprOffset = lineStartOffset + opInLine;
+      const exprLoc = findExpressionLocation(fn, exprOffset);
 
       findings.push({
         id: "AP-ARITH-001",
@@ -67,11 +76,14 @@ export class UncheckedArithmeticPlugin implements Rule, FunctionRule {
         confidence: "medium",
         location: {
           line: fn.bodyLine + i,
+          ...(exprLoc !== null ? { column: exprLoc.column } : {}),
           function: fn.name,
         },
         remediation:
           "Use checked math and handle the error explicitly, e.g. balance.checked_sub(amount).ok_or(Error::Underflow)?; prefer checked_add/checked_sub over + and - for i128/u64 amounts.",
       });
+
+      lineStartOffset += line.length + 1;
     }
 
     return findings;

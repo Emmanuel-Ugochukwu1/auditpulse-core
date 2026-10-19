@@ -167,3 +167,8 @@ export function findFirstMatchLine(
   const index = lines.findIndex((line) => pattern.test(line));
   return index === -1 ? null : index + 1;
 }
+
+export {
+  findExpressionLocation,
+  type FindExpressionOptions,
+} from "../parser/rust.js";

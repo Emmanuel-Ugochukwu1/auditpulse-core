@@ -198,4 +198,20 @@ describe("AP-CALL-001 engine integration", () => {
 
     expect(findings.map((f) => f.id)).toContain("AP-CALL-001");
   });
+
+  it("provides expression-level line and column locations when AST coordinates are present", () => {
+    const code = [
+      "fn payout(env: Env, token_id: Address, to: Address, amount: i128) {", // 1
+      "  let client = token::Client::new(&env, &token_id);",               // 2
+      "  client.transfer(&to, &amount);",                                   // 3
+      "}",                                                                  // 4
+    ].join("\n");
+    const findings = new AuditEngine(createDefaultRegistry()).run(code);
+    const callFinding = findings.find((f) => f.id === "AP-CALL-001");
+
+    expect(callFinding).toBeDefined();
+    expect(callFinding?.location.function).toBe("payout");
+    expect(callFinding?.location.line).toBe(3);
+    expect(callFinding?.location.column).toBe(10);
+  });
 });

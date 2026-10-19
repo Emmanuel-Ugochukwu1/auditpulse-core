@@ -135,6 +135,22 @@ describe("UncheckedArithmeticPlugin (AP-ARITH-001)", () => {
 
     expect(UncheckedArithmeticPlugin.scan(code)).toHaveLength(0);
   });
+
+  it("provides expression-level operator column when AST coordinates are present", () => {
+    const code = [
+      "fn withdraw(env: Env, user: Address, amount: i128) {", // 1
+      "  let mut balance = 100;",                              // 2
+      "  balance = balance - amount;",                         // 3
+      "}",                                                     // 4
+    ].join("\n");
+    const findings = new AuditEngine(createDefaultRegistry()).run(code);
+    const arithFinding = findings.find((f) => f.id === "AP-ARITH-001");
+
+    expect(arithFinding).toBeDefined();
+    expect(arithFinding?.location.function).toBe("withdraw");
+    expect(arithFinding?.location.line).toBe(3);
+    expect(arithFinding?.location.column).toBe(21);
+  });
 });
 
 describe("UnvalidatedExternalCallPlugin (AP-CALL-001)", () => {

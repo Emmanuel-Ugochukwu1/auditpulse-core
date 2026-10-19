@@ -6,6 +6,7 @@ import { main } from "./cli.js";
 export { AuditEngine } from "./engine.js";
 export { RuleRegistry, createDefaultRegistry } from "./registry.js";
 export type { Severity, Confidence, SourceLocation, Vulnerability, Rule, RuleId } from "./types.js";
+export { findExpressionLocation, type FindExpressionOptions } from "./parser/rust.js";
 export { TOOL_NAME, TOOL_VERSION } from "./version.js";
 
 const argv = process.argv.slice(2);
