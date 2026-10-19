@@ -27,9 +27,12 @@ export class MissingExtendTtlPlugin implements Rule, AstAwareRule {
     }
 
     const extended =
-      /\.extend_ttl\s*\(/.test(clean) ||
-      /extend_ttl_to_threshold\s*\(/.test(clean) ||
-      /get_extended\s*\(/.test(clean);
+      /(?:\.|\b)extend_ttl\s*!?\s*[\(\[{]/.test(clean) ||
+      /(?:\.|\b)extend_ttl_to_threshold\s*!?\s*[\(\[{]/.test(clean) ||
+      /(?:\.|\b)extend_temporary_ttl\s*!?\s*[\(\[{]/.test(clean) ||
+      /(?:\.|\b)extend_persistent_ttl\s*!?\s*[\(\[{]/.test(clean) ||
+      /(?:\.|\b)bump_ttl\s*!?\s*[\(\[{]/.test(clean) ||
+      /(?:\.|\b)get_extended\s*!?\s*[\(\[{]/.test(clean);
     if (extended) {
       return [];
     }
