@@ -11,6 +11,7 @@ Lightweight static analysis security scanner for Soroban (Stellar) smart contrac
 * **`unvalidatedExternalCall`** (`AP-CALL-001`): Flags cross-contract/token operations (transfers, burns, mints, admin changes) with no `require_auth` and no evidence-backed validation: an explicitly checked id (`assert!`/`require!`/comparison) before the call suppresses the finding, an unchecked user-supplied `*_id` argument is reported (medium confidence — naming alone is not a boundary), and a storage-resolved id target is reported at low confidence.
 * **`unprotectedUpgrade`** (`AP-UPG-001`): Flags upgrade/migration/admin-configuration functions (recognized by name) that contain no `require_auth` or admin check.
 * **`debugStatements`** (`AP-DEBUG-001`): Flags debug/development-only macros (`log!`, `dbg!`, `println!`, `print!`, `eprint(ln)!`) left in production contract code.
+* **`unsafeCasts`** (`AP-CAST-001`): Flags narrowing integer casts (`as u64`, `as u32`, etc.) on amount-like values without checked conversions, preventing silent truncation.
 
 ### Severity and confidence
 
@@ -26,6 +27,7 @@ detected pattern is actually problematic. The two are independent:
 | `AP-CALL-001` | high | low–medium (tiered by evidence) |
 | `AP-UPG-001` | critical | medium |
 | `AP-DEBUG-001` | low | high |
+| `AP-CAST-001` | medium | medium |
 
 ### Fixtures
 

@@ -23,6 +23,12 @@ function idsOf(findings: Vulnerability[]): string[] {
 }
 
 describe("fixtures/vulnerable", () => {
+  it("unsafe_integer_cast.rs triggers AP-CAST-001", () => {
+    const findings = scanFixture("vulnerable/unsafe_integer_cast.rs");
+
+    expect(findings.filter((f) => f.id === "AP-CAST-001").length).toBe(2);
+  });
+
   it("unchecked_arithmetic.rs triggers AP-ARITH-001", () => {
     const findings = scanFixture("vulnerable/unchecked_arithmetic.rs");
 
@@ -100,6 +106,10 @@ describe("fixtures/safe", () => {
 
   it("auth_gated.rs produces no findings", () => {
     expect(idsOf(scanFixture("safe/auth_gated.rs"))).toEqual([]);
+  });
+
+  it("checked_integer_cast.rs produces no findings", () => {
+    expect(idsOf(scanFixture("safe/checked_integer_cast.rs"))).toEqual([]);
   });
 });
 
@@ -236,11 +246,13 @@ describe("fixtures/workspaces", () => {
 describe("finding quality across all fixtures", () => {
   const allFixtures = [
     "vulnerable/unchecked_arithmetic.rs",
+    "vulnerable/unsafe_integer_cast.rs",
     "vulnerable/unvalidated_external_call.rs",
     "vulnerable/unprotected_upgrade.rs",
     "vulnerable/debug_statements.rs",
     "vulnerable/auth_after_operation.rs",
     "safe/checked_arithmetic.rs",
+    "safe/checked_integer_cast.rs",
     "safe/validated_external_call.rs",
     "safe/protected_upgrade.rs",
     "safe/no_debug_statements.rs",
