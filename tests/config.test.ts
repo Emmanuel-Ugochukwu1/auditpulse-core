@@ -17,6 +17,7 @@ const RULE_IDS = [
   "AP-CALL-001",
   "AP-UPG-001",
   "AP-DEBUG-001",
+  "AP-BOUND-001",
 ];
 
 describe("parseConfig", () => {
