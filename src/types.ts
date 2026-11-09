@@ -40,6 +40,13 @@ export interface ScannedFunction {
   bodyLine: number;
   /** 1-based column of the body's opening brace; omitted in text-fallback extraction. */
   bodyColumn?: number;
+  /**
+   * Outer attributes on the declaration, in source order, as the text
+   * between `#[` and `]` with whitespace collapsed (`#[only_role(caller,
+   * "minter")]` becomes `only_role(caller, "minter")`). Attributes are not
+   * part of `body`; omitted by extractors that do not collect them.
+   */
+  attributes?: string[];
 }
 
 /** Stable, machine-readable rule identifier, e.g. "AP-AUTH-001". */

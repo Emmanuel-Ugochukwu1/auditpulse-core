@@ -1,6 +1,11 @@
 import type { Rule, ScannedFunction, Vulnerability } from "../types";
 import type { FunctionRule } from "../engine.js";
-import { extractRustFunctions, functionLocation, removeComments } from "../utils/rust.js";
+import {
+  extractRustFunctions,
+  functionLocation,
+  hasAuthAttribute,
+  removeComments,
+} from "../utils/rust.js";
 
 /**
  * Recognizable administrative/upgrade entrypoints. Only function names in
@@ -35,12 +40,16 @@ export class UnprotectedUpgradePlugin implements Rule, FunctionRule {
     );
   }
 
-  /** The engine passes raw functions; comments are stripped before matching. */
+  /**
+   * The engine passes raw functions; comments are stripped before matching.
+   * An authorization attribute macro on the declaration (`#[only_admin]`,
+   * `#[only_role(..)]`, ...) counts as the check.
+   */
   scanFunction(fn: ScannedFunction): Vulnerability[] {
     if (!ADMIN_FUNCTION_NAME.test(fn.name)) {
       return [];
     }
-    if (AUTHORIZATION_CHECK.test(removeComments(fn.bodyInner))) {
+    if (hasAuthAttribute(fn) || AUTHORIZATION_CHECK.test(removeComments(fn.bodyInner))) {
       return [];
     }
 
