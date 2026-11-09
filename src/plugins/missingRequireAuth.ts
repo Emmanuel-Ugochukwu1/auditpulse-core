@@ -1,6 +1,11 @@
 import type { Rule, ScannedFunction, Vulnerability } from "../types";
 import type { FunctionRule } from "../engine.js";
-import { extractRustFunctions, functionLocation, sanitizeKeepLines } from "../utils/rust.js";
+import {
+  extractRustFunctions,
+  functionLocation,
+  hasAuthAttribute,
+  sanitizeKeepLines,
+} from "../utils/rust.js";
 
 /**
  * Authorization-sensitive operations (token transfers, balance updates,
@@ -37,8 +42,17 @@ export class MissingRequireAuthPlugin implements Rule, FunctionRule {
    * it does not reason about helper functions — a require_auth inside a
    * callee is invisible here, which is documented as a limitation rather
    * than guessed at.
+   *
+   * An authorization attribute macro (`#[only_owner]`, `#[only_role(..)]`,
+   * ...) expands to a require_auth before the first statement of the body,
+   * so it precedes, and gates, every operation in it. `#[has_role]` does
+   * not authorize and is not accepted.
    */
   scanFunction(fn: ScannedFunction): Vulnerability[] {
+    if (hasAuthAttribute(fn)) {
+      return [];
+    }
+
     const clean = sanitizeKeepLines(fn.body);
     const brace = clean.indexOf("{");
     const body = brace >= 0 ? clean.slice(brace) : clean;

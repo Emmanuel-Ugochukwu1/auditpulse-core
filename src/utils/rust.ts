@@ -98,13 +98,19 @@ export function locateLine(
 /**
  * Extracts top-level functions by brace counting, one nesting level per
  * function. `macro_rules!` blocks are skipped as a unit (brace-based, no
- * macro internals are parsed).
+ * macro internals are parsed). Single-line outer attributes on or directly
+ * above the declaration line are collected into `attributes`.
  */
 export function extractRustFunctions(code: string): ScannedFunction[] {
   const lines = code.split("\n");
   const fns: ScannedFunction[] = [];
-  let current: { line: number; name: string; body: string[]; depth: number } | null =
-    null;
+  let current: {
+    line: number;
+    name: string;
+    body: string[];
+    depth: number;
+    attributes: string[];
+  } | null = null;
 
   const count = (line: string, ch: "{" | "}"): number =>
     line.split(ch).length - 1;
@@ -132,6 +138,7 @@ export function extractRustFunctions(code: string): ScannedFunction[] {
         name: match[1] ?? "<anonymous>",
         body: [line],
         depth: 0,
+        attributes: attributesBefore(lines, i, line.slice(0, match.index)),
       };
     } else {
       current.body.push(line);
@@ -151,12 +158,88 @@ export function extractRustFunctions(code: string): ScannedFunction[] {
         body,
         bodyInner: open >= 0 ? body.slice(open + 1) : "",
         bodyLine: current.line + (open >= 0 ? body.slice(0, open).split("\n").length - 1 : 0),
+        attributes: current.attributes,
       });
       current = null;
     }
   }
 
   return fns;
+}
+
+/**
+ * Outer attributes of the function declared on `lines[fnIndex]`: those on
+ * the declaration line before the `fn` keyword (`prefix`), plus whole lines
+ * of attributes directly above it. Blank and comment-only lines are skipped
+ * (comments are blank in sanitized input); any other line ends the run, so
+ * attributes never leak across items. An attribute spanning several lines
+ * is not collected.
+ */
+function attributesBefore(lines: string[], fnIndex: number, prefix: string): string[] {
+  const collected = leadingAttributes(prefix).attributes;
+  for (let j = fnIndex - 1; j >= 0; j--) {
+    const text = (lines[j] ?? "").trim();
+    if (text === "" || text.startsWith("//")) {
+      continue;
+    }
+    const { attributes, rest } = leadingAttributes(text);
+    if (attributes.length === 0 || rest.trim() !== "") {
+      break;
+    }
+    collected.unshift(...attributes);
+  }
+  return collected;
+}
+
+/**
+ * Outer attributes (`#[...]`; inner `#![...]` excluded) at the start of
+ * `text`, nested brackets balanced, plus whatever follows them.
+ */
+function leadingAttributes(text: string): { attributes: string[]; rest: string } {
+  const attributes: string[] = [];
+  let i = 0;
+  for (;;) {
+    while (i < text.length && /\s/.test(text[i] ?? "")) i++;
+    if (!text.startsWith("#[", i)) break;
+    let depth = 0;
+    let end = i + 1;
+    for (; end < text.length; end++) {
+      if (text[end] === "[") depth++;
+      else if (text[end] === "]" && --depth === 0) break;
+    }
+    if (end >= text.length) break; // continues on the next line
+    attributes.push(text.slice(i + 2, end).replace(/\s+/g, " ").trim());
+    i = end + 1;
+  }
+  return { attributes, rest: text.slice(i) };
+}
+
+/**
+ * Attribute macros that expand to an authorization check placed before the
+ * first statement of the function body. The names are those of the
+ * OpenZeppelin Stellar contracts library (`stellar_macros`), matched with
+ * any path prefix (`#[stellar_macros::only_owner]`):
+ *
+ * - `only_owner`, `only_admin`: load the stored owner/admin and call
+ *   `require_auth()` on it;
+ * - `only_role(account, "role")`, `only_any_role(account, [..])`: check
+ *   role membership, then call `account.require_auth()`.
+ *
+ * Deliberately absent: `has_role` / `has_any_role` check role membership
+ * WITHOUT calling `require_auth()`, so anyone can pass a role holder's
+ * address; pause guards (`when_paused`, `when_not_paused`) are not
+ * authorization. Other attribute macros are opaque: their expansion is not
+ * visible to source-text analysis.
+ */
+const AUTH_ATTRIBUTE =
+  /^(?:::)?(?:[A-Za-z_]\w*\s*::\s*)*(?:only_owner|only_admin|only_role|only_any_role)\s*(?:\(|$)/;
+
+/**
+ * Whether the function carries an attribute macro that authorizes the
+ * caller before its body runs (see AUTH_ATTRIBUTE).
+ */
+export function hasAuthAttribute(fn: ScannedFunction): boolean {
+  return fn.attributes?.some((attribute) => AUTH_ATTRIBUTE.test(attribute)) ?? false;
 }
 
 /** Finds the 1-based line of the first regex match, or null when absent. */

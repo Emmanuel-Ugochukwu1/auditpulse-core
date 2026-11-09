@@ -1,6 +1,11 @@
 import type { Rule, ScannedFunction, Vulnerability } from "../types";
 import type { FunctionRule } from "../engine.js";
-import { extractRustFunctions, functionLocation, sanitizeKeepLines } from "../utils/rust.js";
+import {
+  extractRustFunctions,
+  functionLocation,
+  hasAuthAttribute,
+  sanitizeKeepLines,
+} from "../utils/rust.js";
 
 /**
  * AP-CALL-001 — flags cross-contract / external invocations that perform a
@@ -13,7 +18,9 @@ import { extractRustFunctions, functionLocation, sanitizeKeepLines } from "../ut
  *
  * 1. `env.require_auth()` anywhere in the function suppresses the finding
  *    (presence-based; AP-AUTH-001 owns the late-auth ordering problem and
- *    this rule must not double-report the same root cause).
+ *    this rule must not double-report the same root cause). So does an
+ *    authorization attribute macro (`#[only_owner]`, `#[only_role(..)]`,
+ *    ...), which expands to a require_auth at the top of the body.
  * 2. An explicit check on an id-bearing value before the call — `assert!`/
  *    `require!` or an equality/inequality comparison on the same line as
  *    the id — suppresses the finding.
@@ -96,7 +103,7 @@ export class UnvalidatedExternalCallPlugin implements Rule, FunctionRule {
     const body = sanitizeKeepLines(fn.bodyInner);
     const callSites = findCallSites(body);
 
-    if (callSites.length === 0 || AUTH_CHECK.test(body)) {
+    if (callSites.length === 0 || AUTH_CHECK.test(body) || hasAuthAttribute(fn)) {
       return [];
     }
 
