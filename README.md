@@ -53,6 +53,28 @@ original source-text extraction (line and function only) and continues without
 losing findings. This is structural parsing only — AuditPulse does not perform
 Rust type analysis, semantic analysis, or cross-file dataflow.
 
+### Authorization attribute macros
+
+Contracts built on the OpenZeppelin Stellar library often gate entrypoints
+with attribute macros instead of an inline `require_auth`. Each macro adds
+the check before the first statement of the function body, so the check
+never shows up in the body's source text. AuditPulse reads each function's
+outer attributes and treats these as authorization for `AP-AUTH-001`,
+`AP-UPG-001` and `AP-CALL-001`, with or without a path prefix
+(`#[stellar_macros::only_owner]`):
+
+| Attribute | Expands to | Treated as authorization |
+|-----------|------------|--------------------------|
+| `#[only_owner]`, `#[only_admin]` | stored owner/admin `.require_auth()` | yes |
+| `#[only_role(acct, "r")]`, `#[only_any_role(acct, [..])]` | role check, then `acct.require_auth()` | yes |
+| `#[has_role(..)]`, `#[has_any_role(..)]` | role check only, no `require_auth` | no |
+| `#[when_paused]`, `#[when_not_paused]` | pause guard | no |
+
+`#[has_role]` on its own lets anyone pass the address of a role holder, so
+those functions are still reported unless the body calls `require_auth`
+itself. AuditPulse goes by the attribute's name and never expands the macro,
+so a custom attribute macro with another name is not recognized.
+
 ### Limitations
 
 Function structure comes from Tree-sitter parsing (see above); the checks
@@ -78,6 +100,11 @@ never any cross-file dataflow. Known consequences:
   interprocedural data flow.
 * `AP-UPG-001` recognizes admin/upgrade functions by name, so unusual naming
   can evade it.
+* Authorization attribute macros are recognized by name only (see
+  [Authorization attribute macros](#authorization-attribute-macros)). When
+  the AST is unavailable, the source-text fallback collects only attributes
+  written on a single line. An attribute that spans several lines is missed
+  there, so the finding is kept rather than hidden.
 * Directory scans evaluate each Rust file independently; there is no
   cross-file dataflow analysis.
 
