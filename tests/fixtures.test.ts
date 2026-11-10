@@ -108,6 +108,15 @@ describe("fixtures/edge-cases", () => {
     expect(idsOf(scanFixture("edge-cases/comments_and_strings.rs"))).toEqual([]);
   });
 
+  it("ttl_storage_edge_cases.rs fires AP-STORAGE-001 exactly once (file-level)", () => {
+    const findings = scanFixture("edge-cases/ttl_storage_edge_cases.rs");
+
+    // The file has extend_ttl in persistent_only_ttl and mixed_ttl_and_no_ttl,
+    // so the file-level rule should NOT fire. All storage accesses are covered.
+    const storage = findings.filter((f) => f.id === "AP-STORAGE-001");
+    expect(storage).toHaveLength(0);
+  });
+
   it("call_validation_tiers.rs fires the storage tier exactly once", () => {
     const findings = scanFixture("edge-cases/call_validation_tiers.rs");
 
@@ -251,6 +260,7 @@ describe("finding quality across all fixtures", () => {
     "edge-cases/formatting_variants.rs",
     "edge-cases/nested_blocks.rs",
     "edge-cases/structural_ast.rs",
+    "edge-cases/ttl_storage_edge_cases.rs",
     "workspaces/vault-set/vault-core.rs",
     "workspaces/vault-set/vault-host.rs",
   ];
