@@ -36,8 +36,8 @@ import { extractRustFunctions, functionLocation, sanitizeKeepLines } from "../ut
 const SENSITIVE_CALL =
   /\b(?:transfer|transfer_from|burn|mint|clawback|set_authorized|set_admin)\s*\(/g;
 
-/** An explicit authorization check inside the function body. */
-const AUTH_CHECK = /require_auth(?:_for_args)?\s*\(/;
+/** An explicit authorization check inside the function body (direct call or macro invocation). */
+const AUTH_CHECK = /require_auth(?:_for_args)?\s*!?\s*[\(\[{]/;
 
 /** Any id-named value: `token_id`, `contract_id`, `asset_id`, ... */
 const ID_MENTION = /\b[A-Za-z_]\w*_id\b/;
