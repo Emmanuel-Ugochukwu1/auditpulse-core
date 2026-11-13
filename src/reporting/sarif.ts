@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { FileFinding, ScanReport } from "../scanner";
 import { TOOL_NAME, TOOL_VERSION } from "../version.js";
 
@@ -13,6 +14,8 @@ import { TOOL_NAME, TOOL_VERSION } from "../version.js";
 export interface SarifOptions {
   /** id -> description, taken from the rule registry at scan time. */
   ruleDescriptions: Map<string, string>;
+  /** Optional rule help URIs (or defaults to README anchors derived from rule ids) */
+  ruleHelpUris?: Map<string, string>;
 }
 
 const SEVERITY_TO_SARIF_LEVEL: Record<string, string> = {
@@ -22,6 +25,16 @@ const SEVERITY_TO_SARIF_LEVEL: Record<string, string> = {
   low: "note",
 };
 
+export function computeLineHash(
+  file: string,
+  ruleId: string,
+  message: string,
+): string {
+  return createHash("sha256")
+    .update(`${file}:${ruleId}:${message}`)
+    .digest("hex");
+}
+
 export function toSarifLog(
   report: ScanReport,
   options: SarifOptions,
@@ -29,7 +42,16 @@ export function toSarifLog(
   // One rule entry per finding id, in first-seen order.
   const rulesById = new Map<
     string,
-    { id: string; shortDescription: { text: string }; defaultConfiguration: { level: string } }
+    {
+      id: string;
+      shortDescription: { text: string };
+      defaultConfiguration: { level: string };
+      helpUri: string;
+      properties: {
+        precision: string;
+        tags: string[];
+      };
+    }
   >();
   for (const finding of report.findings) {
     if (rulesById.has(finding.id)) continue;
@@ -41,35 +63,53 @@ export function toSarifLog(
       defaultConfiguration: {
         level: SEVERITY_TO_SARIF_LEVEL[finding.severity] ?? "warning",
       },
+      helpUri:
+        options.ruleHelpUris?.get(finding.id) ??
+        `https://github.com/Emmanuel-Ugochukwu1/auditpulse-core#${finding.id.toLowerCase()}`,
+      properties: {
+        precision: finding.confidence ?? "medium",
+        tags: ["security", "soroban", "smart-contracts"],
+      },
     });
   }
   const rules = [...rulesById.values()];
 
-  const results = report.findings.map((finding) => ({
-    ruleId: finding.id,
-    level: SEVERITY_TO_SARIF_LEVEL[finding.severity] ?? "warning",
-    message: { text: finding.message },
-    locations: [
-      {
-        physicalLocation: {
-          artifactLocation: { uri: finding.file.replace(/\\/g, "/") },
-          region: {
-            startLine: finding.location.line,
-            ...(finding.location.column !== undefined
-              ? { startColumn: finding.location.column }
-              : {}),
+  const results = report.findings.map((finding) => {
+    const normFile = finding.file.replace(/\\/g, "/");
+    const props: Record<string, unknown> = {};
+    if (finding.confidence !== undefined) {
+      props.precision = finding.confidence;
+    }
+    if (finding.remediation !== undefined) {
+      props.remediation = finding.remediation;
+    }
+
+    return {
+      ruleId: finding.id,
+      level: SEVERITY_TO_SARIF_LEVEL[finding.severity] ?? "warning",
+      message: { text: finding.message },
+      locations: [
+        {
+          physicalLocation: {
+            artifactLocation: { uri: normFile },
+            region: {
+              startLine: finding.location.line,
+              ...(finding.location.column !== undefined
+                ? { startColumn: finding.location.column }
+                : {}),
+            },
           },
         },
+      ],
+      partialFingerprints: {
+        primaryLocationLineHash: computeLineHash(normFile, finding.id, finding.message),
       },
-    ],
-    ...(finding.remediation !== undefined
-      ? { properties: { remediation: finding.remediation } }
-      : {}),
-  }));
+      ...(Object.keys(props).length > 0 ? { properties: props } : {}),
+    };
+  });
 
   return {
-    $schema:
-      "https://json.schemastore.org/sarif-2.1.0.json",
+    $schema: "https://json.schemastore.org/sarif-2.1.0.json",
     version: "2.1.0",
     runs: [
       {
@@ -79,6 +119,11 @@ export function toSarifLog(
             version: TOOL_VERSION,
             informationUri: "https://github.com/Emmanuel-Ugochukwu1/auditpulse-core",
             rules,
+          },
+        },
+        automationDetails: {
+          description: {
+            text: `AuditPulse CLI scan ${TOOL_VERSION}`,
           },
         },
         results,
