@@ -103,7 +103,7 @@ export function locateLine(
 export function extractRustFunctions(code: string): ScannedFunction[] {
   const lines = code.split("\n");
   const fns: ScannedFunction[] = [];
-  let current: { line: number; name: string; body: string[]; depth: number } | null =
+  let current: { line: number; name: string; body: string[]; depth: number; attributes?: string[] } | null =
     null;
 
   const count = (line: string, ch: "{" | "}"): number =>
@@ -127,11 +127,29 @@ export function extractRustFunctions(code: string): ScannedFunction[] {
       if (!match) {
         continue;
       }
+
+      const attributes: string[] = [];
+      let j = i - 1;
+      while (j >= 0) {
+        const prevLine = (lines[j] ?? "").trim();
+        if (prevLine === "") {
+          j--;
+          continue;
+        }
+        if (prevLine.startsWith("#[")) {
+          attributes.unshift(prevLine);
+          j--;
+          continue;
+        }
+        break;
+      }
+
       current = {
         line: i + 1,
         name: match[1] ?? "<anonymous>",
         body: [line],
         depth: 0,
+        attributes,
       };
     } else {
       current.body.push(line);
@@ -151,6 +169,7 @@ export function extractRustFunctions(code: string): ScannedFunction[] {
         body,
         bodyInner: open >= 0 ? body.slice(open + 1) : "",
         bodyLine: current.line + (open >= 0 ? body.slice(0, open).split("\n").length - 1 : 0),
+        attributes: current.attributes,
       });
       current = null;
     }
@@ -166,4 +185,36 @@ export function findFirstMatchLine(
 ): number | null {
   const index = lines.findIndex((line) => pattern.test(line));
   return index === -1 ? null : index + 1;
+}
+
+/**
+ * Detects whether a scanned function is guarded by an authorization attribute macro
+ * such as #[only_owner], #[only_admin], #[require_auth], or #[only_role(...)].
+ */
+export function hasAuthAttribute(fn: ScannedFunction): boolean {
+  const pattern = /#\[\s*(?:only_owner|only_admin|require_auth|only_role|auth)\b/;
+  return (fn.attributes ?? []).some((attr) => pattern.test(attr));
+}
+
+/**
+ * Names of macro_rules! macros defined in code whose body calls
+ * pattern. Invoking such a macro expands to that call, so rules treat
+ * name!(...) as if the call were written inline.
+ */
+export function macrosContaining(code: string, pattern: RegExp): string[] {
+  const clean = sanitizeKeepLines(code);
+  const names: string[] = [];
+  const header = /macro_rules!\s*([A-Za-z_]\w*)\s*\{/g;
+  for (let m = header.exec(clean); m; m = header.exec(clean)) {
+    let depth = 1;
+    let i = header.lastIndex;
+    for (; i < clean.length && depth > 0; i++) {
+      if (clean[i] === "{") depth++;
+      else if (clean[i] === "}") depth--;
+    }
+    if (pattern.test(clean.slice(header.lastIndex, i))) {
+      names.push(m[1] ?? "");
+    }
+  }
+  return names;
 }

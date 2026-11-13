@@ -40,6 +40,8 @@ export interface ScannedFunction {
   bodyLine: number;
   /** 1-based column of the body's opening brace; omitted in text-fallback extraction. */
   bodyColumn?: number;
+  /** Outer attribute macros preceding the function, e.g. ['#[only_owner]']. */
+  attributes?: string[];
 }
 
 /** Stable, machine-readable rule identifier, e.g. "AP-AUTH-001". */

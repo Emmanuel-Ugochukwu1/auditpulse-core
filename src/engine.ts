@@ -10,7 +10,7 @@ import { extractRustFunctionsAst } from "./parser/rust.js";
  */
 export interface FunctionRule {
   /** Scans one function; receives the boundaries and body of its declaration. */
-  scanFunction(fn: ScannedFunction): Vulnerability[];
+  scanFunction(fn: ScannedFunction, code?: string): Vulnerability[];
 }
 
 export function isFunctionRule(rule: Rule): rule is Rule & FunctionRule {
@@ -94,7 +94,7 @@ function runFunctionRule(
   }
   const findings: Vulnerability[] = [];
   for (const fn of astFunctions) {
-    findings.push(...rule.scanFunction(fn).map((finding) => stampRuleId(rule, finding)));
+    findings.push(...rule.scanFunction(fn, code).map((finding) => stampRuleId(rule, finding)));
   }
   return findings;
 }
