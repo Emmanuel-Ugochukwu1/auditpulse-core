@@ -265,4 +265,52 @@ describe("SARIF location safety (GitHub Code Scanning)", () => {
     expect(result.locations).toHaveLength(1);
     expect(result.ruleId).toBe("AP-AUTH-001");
   });
+  it("emits enriched SARIF metadata including helpUri, precision, fingerprints, and automationDetails", () => {
+    const customHelpUris = new Map([
+      ["AP-AUTH-001", "https://github.com/Emmanuel-Ugochukwu1/auditpulse-core#auth-rule"],
+    ]);
+    const log = JSON.parse(
+      renderSarif(
+        report([
+          finding({
+            id: "AP-AUTH-001",
+            file: "contracts/SampleVault.rs",
+            confidence: "high",
+            remediation: "Add require_auth",
+          }),
+        ]),
+        { ruleDescriptions, ruleHelpUris: customHelpUris },
+      ),
+    ) as any;
+
+    expect(log.runs[0].automationDetails?.description?.text).toContain("AuditPulse CLI scan");
+    const rule = log.runs[0].tool.driver.rules[0];
+    expect(rule.helpUri).toBe("https://github.com/Emmanuel-Ugochukwu1/auditpulse-core#auth-rule");
+    expect(rule.properties?.precision).toBe("high");
+    expect(rule.properties?.tags).toContain("security");
+
+    const result = log.runs[0].results[0];
+    expect(result.properties?.precision).toBe("high");
+    expect(result.properties?.remediation).toBe("Add require_auth");
+    expect(result.partialFingerprints?.primaryLocationLineHash).toBeDefined();
+    expect(typeof result.partialFingerprints.primaryLocationLineHash).toBe("string");
+    expect(result.partialFingerprints.primaryLocationLineHash.length).toBe(64);
+  });
+
+  it("guarantees deterministic partialFingerprints for identical findings", () => {
+    const run1 = JSON.parse(
+      renderSarif(report([finding({ file: "a.rs", id: "AP-AUTH-001", message: "Same message" })]), {
+        ruleDescriptions,
+      }),
+    ) as any;
+    const run2 = JSON.parse(
+      renderSarif(report([finding({ file: "a.rs", id: "AP-AUTH-001", message: "Same message" })]), {
+        ruleDescriptions,
+      }),
+    ) as any;
+
+    expect(run1.runs[0].results[0].partialFingerprints.primaryLocationLineHash).toBe(
+      run2.runs[0].results[0].partialFingerprints.primaryLocationLineHash,
+    );
+  });
 });
