@@ -104,6 +104,13 @@ function toAstFunction(node: import("tree-sitter").SyntaxNode): ScannedFunction 
     return null;
   }
 
+  const attributes: string[] = [];
+  let prev = node.previousNamedSibling;
+  while (prev && prev.type === "attribute_item") {
+    attributes.unshift(prev.text);
+    prev = prev.previousNamedSibling;
+  }
+
   // Anchor the reported line to the `fn` keyword: attributes sit outside the
   // node, but `pub`/`const` share its first line, so the node start would
   // usually agree — the token is exact in every case.
@@ -126,5 +133,6 @@ function toAstFunction(node: import("tree-sitter").SyntaxNode): ScannedFunction 
     bodyInner: open >= 0 ? body.slice(open + 1) : "",
     bodyLine,
     bodyColumn: bodyNode.startPosition.column + 1,
+    attributes,
   };
 }

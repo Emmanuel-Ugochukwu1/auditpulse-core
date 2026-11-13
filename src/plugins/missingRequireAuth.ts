@@ -1,6 +1,12 @@
 import type { Rule, ScannedFunction, Vulnerability } from "../types";
 import type { FunctionRule } from "../engine.js";
-import { extractRustFunctions, functionLocation, sanitizeKeepLines } from "../utils/rust.js";
+import {
+  extractRustFunctions,
+  functionLocation,
+  hasAuthAttribute,
+  macrosContaining,
+  sanitizeKeepLines,
+} from "../utils/rust.js";
 
 /**
  * Authorization-sensitive operations (token transfers, balance updates,
@@ -10,7 +16,7 @@ const SENSITIVE_OP =
   /client\.|\btransfer\b|\btransfer_from\b|\bburn\b|\bbump_arc\b|\bput_arc\b|\bdel_arc\b|\bget_arc\b|\.set\s*\(/;
 
 /** An explicit authorization check inside the function body. */
-const AUTH_CHECK = /require_auth(?:_for_args)?\s*\(/;
+const AUTH_CHECK = /require_auth(?:_for_args)?\s*\(|assert_auth!\s*\(|auth_check!\s*\(/;
 
 export class MissingRequireAuthPlugin implements Rule, FunctionRule {
   id = "AP-AUTH-001";
@@ -20,25 +26,23 @@ export class MissingRequireAuthPlugin implements Rule, FunctionRule {
 
   scan(code: string): Vulnerability[] {
     return extractRustFunctions(sanitizeKeepLines(code)).flatMap((fn) =>
-      this.scanFunction(fn),
+      this.scanFunction(fn, code),
     );
   }
 
   /**
-   * The engine passes functions extracted from raw source; comments and
-   * string contents are blanked here so only executable text is judged.
+   * Scans a function for authorization boundaries.
    *
-   * Ordering matters: an auth check only gates operations that execute
-   * after it. When the first sensitive operation appears before the first
-   * require_auth in the body, the operation runs unauthorized and the
-   * finding survives. A trailing require_auth does not retroactively gate
-   * it. This is a positional heuristic over the function body (AST-bounded
-   * when available): it cannot tie an auth call to specific arguments, and
-   * it does not reason about helper functions — a require_auth inside a
-   * callee is invisible here, which is documented as a limitation rather
-   * than guessed at.
+   * Now recognizes:
+   * 1. Procedural attribute macros (e.g. `#[only_owner]`, `#[only_admin]`, `#[require_auth]`).
+   * 2. Local `macro_rules!` expansions that wrap `require_auth` or authorization checks.
    */
-  scanFunction(fn: ScannedFunction): Vulnerability[] {
+  scanFunction(fn: ScannedFunction, fileCode?: string): Vulnerability[] {
+    // 1. Procedural attribute macros preceding the function
+    if (hasAuthAttribute(fn)) {
+      return [];
+    }
+
     const clean = sanitizeKeepLines(fn.body);
     const brace = clean.indexOf("{");
     const body = brace >= 0 ? clean.slice(brace) : clean;
@@ -48,7 +52,14 @@ export class MissingRequireAuthPlugin implements Rule, FunctionRule {
       return [];
     }
 
-    const auth = AUTH_CHECK.exec(body);
+    // 2. Local macro_rules! whose body calls require_auth
+    const macros = fileCode === undefined ? [] : macrosContaining(fileCode, AUTH_CHECK);
+    const authPattern =
+      macros.length === 0
+        ? AUTH_CHECK
+        : new RegExp(`${AUTH_CHECK.source}|\\b(?:${macros.join("|")})\\s*!\\s*[(\\[{]`);
+
+    const auth = authPattern.exec(body);
     if (auth && auth.index < sensitive.index) {
       return [];
     }
