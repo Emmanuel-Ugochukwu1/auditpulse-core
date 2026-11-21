@@ -220,6 +220,22 @@ describe("fixtures/edge-cases", () => {
     expect(ids).not.toContain("AP-UPG-001");
     expect(ids).not.toContain("AP-ERROR-001");
   });
+
+  it("ttl_extension_scope.rs is silent under the file-level rule", () => {
+    // managed() extends its own key; unmanaged() does not. The extension in
+    // managed() suppresses the whole file, so unmanaged() is not reported.
+    expect(idsOf(scanFixture("edge-cases/ttl_extension_scope.rs"))).not.toContain(
+      "AP-STORAGE-001",
+    );
+  });
+
+  it("ttl_wrong_key_kind.rs is silent under the presence-only check", () => {
+    // The extension targets a different key and storage kind; the rule only
+    // checks that some extension exists, so it does not report read_balance.
+    expect(idsOf(scanFixture("edge-cases/ttl_wrong_key_kind.rs"))).not.toContain(
+      "AP-STORAGE-001",
+    );
+  });
 });
 
 describe("fixtures/workspaces", () => {
@@ -251,6 +267,8 @@ describe("finding quality across all fixtures", () => {
     "edge-cases/formatting_variants.rs",
     "edge-cases/nested_blocks.rs",
     "edge-cases/structural_ast.rs",
+    "edge-cases/ttl_extension_scope.rs",
+    "edge-cases/ttl_wrong_key_kind.rs",
     "workspaces/vault-set/vault-core.rs",
     "workspaces/vault-set/vault-host.rs",
   ];
