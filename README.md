@@ -53,6 +53,23 @@ original source-text extraction (line and function only) and continues without
 losing findings. This is structural parsing only — AuditPulse does not perform
 Rust type analysis, semantic analysis, or cross-file dataflow.
 
+### Authorization and TTL boundaries from attributes and local macros
+
+AuditPulse reads outer attributes on each function and follows local
+`macro_rules!` wrappers within the same Rust file. An authorization boundary is
+recognized from `#[only_owner]`, `#[only_admin]`, `#[only_role(..)]`,
+`#[only_any_role(..)]`, a direct `require_auth` / `require_auth_for_args` call,
+or a local macro that reaches one of those calls, including through another
+local macro (`outer!` -> `inner!` -> `require_auth`). The same reachability
+model recognizes local macros that call `extend_ttl`,
+`extend_ttl_to_threshold`, or `get_extended` for `AP-STORAGE-001`.
+
+Role checks and pause guards are not authorization:
+`#[has_role(..)]`, `#[has_any_role(..)]`, `#[when_paused]`, and
+`#[when_not_paused]` do not suppress a finding on their own. The analysis is
+local and textual: it does not invoke the Rust compiler or expand macros from
+other files.
+
 ### Limitations
 
 Function structure comes from Tree-sitter parsing (see above); the checks
@@ -78,6 +95,9 @@ never any cross-file dataflow. Known consequences:
   interprocedural data flow.
 * `AP-UPG-001` recognizes admin/upgrade functions by name, so unusual naming
   can evade it.
+* Local macro names are followed only within the scanned file. A wrapper
+  imported from another module is not expanded, and the source-text fallback
+  recognizes only single-line outer attributes.
 * Directory scans evaluate each Rust file independently; there is no
   cross-file dataflow analysis.
 

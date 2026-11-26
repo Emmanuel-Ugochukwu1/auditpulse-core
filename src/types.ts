@@ -40,6 +40,21 @@ export interface ScannedFunction {
   bodyLine: number;
   /** 1-based column of the body's opening brace; omitted in text-fallback extraction. */
   bodyColumn?: number;
+  /**
+   * Outer attributes attached to the declaration, stored without the wrapping
+   * `#[` and `]`. Attributes are not part of `body`. The text fallback only
+   * collects single-line attributes, so an unsupported form stays visible
+   * rather than being inferred safe.
+   */
+  attributes?: string[];
+}
+
+/** Per-file facts shared by function rules during one scan. */
+export interface FunctionScanContext {
+  /** Local `macro_rules!` names that reliably reach an authorization call. */
+  authorizationMacros: ReadonlySet<string>;
+  /** Local `macro_rules!` names that reach a recognized TTL extension call. */
+  ttlExtensionMacros: ReadonlySet<string>;
 }
 
 /** Stable, machine-readable rule identifier, e.g. "AP-AUTH-001". */

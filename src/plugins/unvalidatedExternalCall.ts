@@ -1,6 +1,12 @@
-import type { Rule, ScannedFunction, Vulnerability } from "../types";
+import type { FunctionScanContext, Rule, ScannedFunction, Vulnerability } from "../types";
 import type { FunctionRule } from "../engine.js";
-import { extractRustFunctions, functionLocation, sanitizeKeepLines } from "../utils/rust.js";
+import {
+  authorizationMacroNames,
+  extractRustFunctions,
+  functionLocation,
+  hasAuthorizationBoundary,
+  sanitizeKeepLines,
+} from "../utils/rust.js";
 
 /**
  * AP-CALL-001 — flags cross-contract / external invocations that perform a
@@ -35,9 +41,6 @@ import { extractRustFunctions, functionLocation, sanitizeKeepLines } from "../ut
 /** A sensitive external/token operation worth gating. */
 const SENSITIVE_CALL =
   /\b(?:transfer|transfer_from|burn|mint|clawback|set_authorized|set_admin)\s*\(/g;
-
-/** An explicit authorization check inside the function body. */
-const AUTH_CHECK = /require_auth(?:_for_args)?\s*\(/;
 
 /** Any id-named value: `token_id`, `contract_id`, `asset_id`, ... */
 const ID_MENTION = /\b[A-Za-z_]\w*_id\b/;
@@ -86,17 +89,24 @@ export class UnvalidatedExternalCallPlugin implements Rule, FunctionRule {
     "Detects token-movement or admin-change operations against external token/contract clients where no require_auth or explicitly checked address validation appears before the call";
 
   scan(code: string): Vulnerability[] {
+    const context: FunctionScanContext = {
+      authorizationMacros: authorizationMacroNames(code),
+      ttlExtensionMacros: new Set(),
+    };
     return extractRustFunctions(sanitizeKeepLines(code)).flatMap((fn) =>
-      this.scanFunction(fn),
+      this.scanFunction(fn, context),
     );
   }
 
   /** The engine passes functions extracted from raw source; sanitize first. */
-  scanFunction(fn: ScannedFunction): Vulnerability[] {
+  scanFunction(fn: ScannedFunction, context?: FunctionScanContext): Vulnerability[] {
     const body = sanitizeKeepLines(fn.bodyInner);
     const callSites = findCallSites(body);
 
-    if (callSites.length === 0 || AUTH_CHECK.test(body)) {
+    if (
+      callSites.length === 0 ||
+      hasAuthorizationBoundary(fn, context?.authorizationMacros)
+    ) {
       return [];
     }
 
