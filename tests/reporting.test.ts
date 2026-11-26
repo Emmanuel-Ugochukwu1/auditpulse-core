@@ -3,7 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { renderJson } from "../src/reporting/json";
-import { renderSarif } from "../src/reporting/sarif";
+import { findingFingerprint, renderSarif } from "../src/reporting/sarif";
 import { renderHuman } from "../src/reporting/human";
 import type { FileFinding } from "../src/scanner";
 import type { ScanReport } from "../src/scanner";
@@ -198,6 +198,74 @@ describe("SARIF output", () => {
       "AP-DEBUG-001",
     ]);
     expect(renderSarif(report(findings), { ruleDescriptions })).toBe(text);
+  });
+
+  it("adds rule help, tags, automation metadata, and per-result precision", () => {
+    const customHelp = new Map([
+      ["AP-AUTH-001", "https://example.test/rules/auth"],
+    ]);
+    const log = JSON.parse(
+      renderSarif(
+        report([
+          finding({ file: "a.rs", confidence: "high" }),
+          finding({ file: "b.rs", confidence: "medium" }),
+        ]),
+        { ruleDescriptions, ruleHelpUris: customHelp },
+      ),
+    ) as any;
+
+    const rule = log.runs[0].tool.driver.rules[0];
+    expect(rule.helpUri).toBe("https://example.test/rules/auth");
+    expect(rule.properties.tags).toEqual([
+      "security",
+      "soroban",
+      "smart-contracts",
+    ]);
+    expect(log.runs[0].automationDetails).toEqual({
+      id: `auditpulse/${log.runs[0].tool.driver.version}`,
+      description: { text: "auditpulse static analysis run" },
+    });
+    expect(
+      log.runs[0].results.map((result: any) => result.properties.precision),
+    ).toEqual(["high", "medium"]);
+  });
+
+  it("uses a stable repository documentation URI by default", () => {
+    const log = JSON.parse(
+      renderSarif(report([finding({ file: "a.rs" })]), { ruleDescriptions }),
+    ) as any;
+
+    expect(log.runs[0].tool.driver.rules[0].helpUri).toBe(
+      "https://github.com/Emmanuel-Ugochukwu1/auditpulse-core/blob/main/README.md#checks",
+    );
+  });
+
+  it("keeps duplicate findings distinct while remaining line-stable", () => {
+    const atLine7 = finding({
+      file: "a.rs",
+      location: { line: 7, function: "withdraw" },
+    });
+    const movedToLine19 = finding({
+      file: "a.rs",
+      location: { line: 19, function: "withdraw" },
+    });
+    const duplicate = finding({
+      file: "a.rs",
+      location: { line: 7, function: "withdraw" },
+    });
+
+    expect(findingFingerprint(movedToLine19)).toBe(findingFingerprint(atLine7));
+    expect(findingFingerprint(duplicate, 1)).not.toBe(
+      findingFingerprint(atLine7, 0),
+    );
+
+    const log = JSON.parse(
+      renderSarif(report([atLine7, duplicate]), { ruleDescriptions }),
+    ) as any;
+    const fingerprints = log.runs[0].results.map(
+      (result: any) => result.partialFingerprints.primaryLocationLineHash,
+    );
+    expect(new Set(fingerprints).size).toBe(2);
   });
 });
 
