@@ -185,9 +185,14 @@ node dist/index.js sarif contracts/SampleVault.rs > auditpulse.sarif
 ```
 
 Emits SARIF 2.1.0 with the tool driver, rule metadata (ids, descriptions,
-levels) and one result per finding with file URI and start line (plus start
-column when the rule verified it), ready for
-upload to GitHub Code Scanning.
+levels, help links and security tags), run automation details, and one result
+per finding with file URI, start line (plus start column when the rule
+verified it), confidence-derived precision, and a deterministic
+`partialFingerprints.primaryLocationLineHash` for stable alert correlation.
+The adapter defaults rule help links to the [checks](#checks) section unless
+callers provide `ruleHelpUris`. Fingerprints deliberately exclude line and
+column so code movement does not look like a new alert; identical findings in
+the same function receive distinct occurrence-numbered hashes.
 
 ## Configuration
 
