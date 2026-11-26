@@ -76,6 +76,12 @@ never any cross-file dataflow. Known consequences:
   `try_*` results, `.unwrap()`/`panic!`, or a bare rename are never treated
   as validation. This is structural AST reasoning, not semantic or
   interprocedural data flow.
+* `AP-STORAGE-001` matches an extension to the same storage kind and key.
+  A bare-identifier extension key is treated conservatively as covering that
+  storage kind, because resolving every aliased key requires data-flow
+  analysis. It reports one finding per file, at the earliest uncovered
+  access, and does not treat TTL calls mentioned only in comments or strings
+  as coverage.
 * `AP-UPG-001` recognizes admin/upgrade functions by name, so unusual naming
   can evade it.
 * Directory scans evaluate each Rust file independently; there is no
