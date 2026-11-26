@@ -1,6 +1,12 @@
-import type { Rule, ScannedFunction, Vulnerability } from "../types";
+import type { FunctionScanContext, Rule, ScannedFunction, Vulnerability } from "../types";
 import type { FunctionRule } from "../engine.js";
-import { extractRustFunctions, functionLocation, sanitizeKeepLines } from "../utils/rust.js";
+import {
+  authorizationMacroNames,
+  extractRustFunctions,
+  firstAuthorizationOffset,
+  functionLocation,
+  sanitizeKeepLines,
+} from "../utils/rust.js";
 
 /**
  * Authorization-sensitive operations (token transfers, balance updates,
@@ -9,9 +15,6 @@ import { extractRustFunctions, functionLocation, sanitizeKeepLines } from "../ut
 const SENSITIVE_OP =
   /client\.|\btransfer\b|\btransfer_from\b|\bburn\b|\bbump_arc\b|\bput_arc\b|\bdel_arc\b|\bget_arc\b|\.set\s*\(/;
 
-/** An explicit authorization check inside the function body. */
-const AUTH_CHECK = /require_auth(?:_for_args)?\s*\(/;
-
 export class MissingRequireAuthPlugin implements Rule, FunctionRule {
   id = "AP-AUTH-001";
   name = "Missing Require Auth";
@@ -19,8 +22,12 @@ export class MissingRequireAuthPlugin implements Rule, FunctionRule {
     "Detects authorization-sensitive operations (token transfers, balance updates, ledger entry writes) in functions that never call env.require_auth()";
 
   scan(code: string): Vulnerability[] {
+    const context: FunctionScanContext = {
+      authorizationMacros: authorizationMacroNames(code),
+      ttlExtensionMacros: new Set(),
+    };
     return extractRustFunctions(sanitizeKeepLines(code)).flatMap((fn) =>
-      this.scanFunction(fn),
+      this.scanFunction(fn, context),
     );
   }
 
@@ -38,7 +45,7 @@ export class MissingRequireAuthPlugin implements Rule, FunctionRule {
    * callee is invisible here, which is documented as a limitation rather
    * than guessed at.
    */
-  scanFunction(fn: ScannedFunction): Vulnerability[] {
+  scanFunction(fn: ScannedFunction, context?: FunctionScanContext): Vulnerability[] {
     const clean = sanitizeKeepLines(fn.body);
     const brace = clean.indexOf("{");
     const body = brace >= 0 ? clean.slice(brace) : clean;
@@ -48,8 +55,8 @@ export class MissingRequireAuthPlugin implements Rule, FunctionRule {
       return [];
     }
 
-    const auth = AUTH_CHECK.exec(body);
-    if (auth && auth.index < sensitive.index) {
+    const authOffset = firstAuthorizationOffset(fn, context?.authorizationMacros);
+    if (authOffset !== null && authOffset < sensitive.index) {
       return [];
     }
 

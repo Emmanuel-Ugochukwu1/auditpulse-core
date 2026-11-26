@@ -1,6 +1,13 @@
-import type { Rule, RuleId, ScannedFunction, Vulnerability } from "./types";
+import type {
+  FunctionScanContext,
+  Rule,
+  RuleId,
+  ScannedFunction,
+  Vulnerability,
+} from "./types";
 import type { RuleRegistry } from "./registry";
 import { extractRustFunctionsAst } from "./parser/rust.js";
+import { authorizationMacroNames, ttlExtensionMacroNames } from "./utils/rust.js";
 
 /**
  * Optional capability for rules that analyze functions: scanning one parsed
@@ -10,7 +17,7 @@ import { extractRustFunctionsAst } from "./parser/rust.js";
  */
 export interface FunctionRule {
   /** Scans one function; receives the boundaries and body of its declaration. */
-  scanFunction(fn: ScannedFunction): Vulnerability[];
+  scanFunction(fn: ScannedFunction, context?: FunctionScanContext): Vulnerability[];
 }
 
 export function isFunctionRule(rule: Rule): rule is Rule & FunctionRule {
@@ -66,11 +73,15 @@ export class AuditEngine {
   ): Vulnerability[] {
     const disabled = new Set(options.disabledRules ?? []);
     const astFunctions = extractRustFunctionsAst(code);
+    const functionContext: FunctionScanContext = {
+      authorizationMacros: authorizationMacroNames(code),
+      ttlExtensionMacros: ttlExtensionMacroNames(code),
+    };
     const findings: Vulnerability[] = [];
     for (const rule of this.rules()) {
       if (disabled.has(rule.id)) continue;
       if (isFunctionRule(rule)) {
-        findings.push(...runFunctionRule(rule, code, astFunctions));
+        findings.push(...runFunctionRule(rule, code, astFunctions, functionContext));
         continue;
       }
       if (isAstAwareRule(rule)) {
@@ -88,13 +99,14 @@ function runFunctionRule(
   rule: Rule & FunctionRule,
   code: string,
   astFunctions: ScannedFunction[] | null,
+  context: FunctionScanContext,
 ): Vulnerability[] {
   if (astFunctions === null) {
     return rule.scan(code).map((finding) => stampRuleId(rule, finding));
   }
   const findings: Vulnerability[] = [];
   for (const fn of astFunctions) {
-    findings.push(...rule.scanFunction(fn).map((finding) => stampRuleId(rule, finding)));
+    findings.push(...rule.scanFunction(fn, context).map((finding) => stampRuleId(rule, finding)));
   }
   return findings;
 }

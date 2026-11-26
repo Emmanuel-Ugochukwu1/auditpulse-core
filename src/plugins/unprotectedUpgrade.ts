@@ -1,6 +1,12 @@
-import type { Rule, ScannedFunction, Vulnerability } from "../types";
+import type { FunctionScanContext, Rule, ScannedFunction, Vulnerability } from "../types";
 import type { FunctionRule } from "../engine.js";
-import { extractRustFunctions, functionLocation, removeComments } from "../utils/rust.js";
+import {
+  authorizationMacroNames,
+  extractRustFunctions,
+  functionLocation,
+  hasAuthorizationBoundary,
+  removeComments,
+} from "../utils/rust.js";
 
 /**
  * Recognizable administrative/upgrade entrypoints. Only function names in
@@ -30,17 +36,24 @@ export class UnprotectedUpgradePlugin implements Rule, FunctionRule {
     "Detects upgrade, migration, and admin-configuration functions that perform privileged changes without an obvious require_auth or admin check";
 
   scan(code: string): Vulnerability[] {
+    const context: FunctionScanContext = {
+      authorizationMacros: authorizationMacroNames(code),
+      ttlExtensionMacros: new Set(),
+    };
     return extractRustFunctions(removeComments(code)).flatMap((fn) =>
-      this.scanFunction(fn),
+      this.scanFunction(fn, context),
     );
   }
 
   /** The engine passes raw functions; comments are stripped before matching. */
-  scanFunction(fn: ScannedFunction): Vulnerability[] {
+  scanFunction(fn: ScannedFunction, context?: FunctionScanContext): Vulnerability[] {
     if (!ADMIN_FUNCTION_NAME.test(fn.name)) {
       return [];
     }
-    if (AUTHORIZATION_CHECK.test(removeComments(fn.bodyInner))) {
+    if (
+      hasAuthorizationBoundary(fn, context?.authorizationMacros) ||
+      AUTHORIZATION_CHECK.test(removeComments(fn.bodyInner))
+    ) {
       return [];
     }
 

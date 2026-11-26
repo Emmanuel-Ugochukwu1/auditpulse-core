@@ -1,6 +1,11 @@
 import type { Rule, ScannedFunction, Vulnerability } from "../types";
 import type { AstAwareRule } from "../engine.js";
-import { locateLine, removeComments } from "../utils/rust.js";
+import {
+  hasTtlExtension,
+  locateLine,
+  removeComments,
+  ttlExtensionMacroNames,
+} from "../utils/rust.js";
 
 export class MissingExtendTtlPlugin implements Rule, AstAwareRule {
   id = "AP-STORAGE-001";
@@ -26,11 +31,7 @@ export class MissingExtendTtlPlugin implements Rule, AstAwareRule {
       return [];
     }
 
-    const extended =
-      /\.extend_ttl\s*\(/.test(clean) ||
-      /extend_ttl_to_threshold\s*\(/.test(clean) ||
-      /get_extended\s*\(/.test(clean);
-    if (extended) {
+    if (hasTtlExtension(code, ttlExtensionMacroNames(code))) {
       return [];
     }
 

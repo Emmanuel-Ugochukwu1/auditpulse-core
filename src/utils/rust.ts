@@ -103,8 +103,13 @@ export function locateLine(
 export function extractRustFunctions(code: string): ScannedFunction[] {
   const lines = code.split("\n");
   const fns: ScannedFunction[] = [];
-  let current: { line: number; name: string; body: string[]; depth: number } | null =
-    null;
+  let current: {
+    line: number;
+    name: string;
+    body: string[];
+    depth: number;
+    attributes: string[];
+  } | null = null;
 
   const count = (line: string, ch: "{" | "}"): number =>
     line.split(ch).length - 1;
@@ -132,6 +137,7 @@ export function extractRustFunctions(code: string): ScannedFunction[] {
         name: match[1] ?? "<anonymous>",
         body: [line],
         depth: 0,
+        attributes: leadingAttributes(lines, i),
       };
     } else {
       current.body.push(line);
@@ -151,12 +157,172 @@ export function extractRustFunctions(code: string): ScannedFunction[] {
         body,
         bodyInner: open >= 0 ? body.slice(open + 1) : "",
         bodyLine: current.line + (open >= 0 ? body.slice(0, open).split("\n").length - 1 : 0),
+        attributes: current.attributes,
       });
       current = null;
     }
   }
 
   return fns;
+}
+
+/**
+ * Single-line outer attributes directly above a function. Blank lines and
+ * comments are permitted between attributes, as they are in Rust. A
+ * multi-line attribute is deliberately not collected by this conservative
+ * fallback; the AST path handles it.
+ */
+function leadingAttributes(lines: string[], functionLine: number): string[] {
+  const attributes: string[] = [];
+  for (let i = functionLine - 1; i >= 0; i--) {
+    const line = (lines[i] ?? "").trim();
+    if (line === "" || line.startsWith("//") || line.startsWith("/*")) {
+      continue;
+    }
+    if (line.startsWith("#[") && line.endsWith("]")) {
+      attributes.unshift(line.slice(2, -1).replace(/\s+/g, " ").trim());
+      continue;
+    }
+    break;
+  }
+  return attributes;
+}
+
+/** Canonical authorization attribute names whose expansion signs the call. */
+const AUTH_ATTRIBUTE = /(?:^|::)(only_owner|only_admin|only_role|only_any_role|require_auth)(?=\s*(?:[\(\],]|$))/i;
+
+export function hasAuthAttribute(fn: ScannedFunction): boolean {
+  return (fn.attributes ?? []).some((attribute) => AUTH_ATTRIBUTE.test(attribute));
+}
+
+/** An inline authorization function or method call. */
+const AUTH_CALL_SOURCE = String.raw`require_auth(?:_for_args)?\s*\(`;
+
+/** A recognized storage TTL extension call. */
+const TTL_CALL = /\.extend_ttl\s*\(|extend_ttl_to_threshold\s*\(|get_extended\s*\(/;
+
+const MACRO_CALL = /\b([A-Za-z_]\w*)\s*!\s*[\(\[\{]/g;
+
+interface MacroDefinition {
+  name: string;
+  body: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * Parses local `macro_rules!` definitions well enough to build a call graph.
+ * Strings and comments are blanked first; braces are then counted to find the
+ * complete definition. This is token-level reasoning, not compiler expansion.
+ */
+export function extractMacroDefinitions(code: string): MacroDefinition[] {
+  const clean = sanitizeKeepLines(code);
+  const definitions: MacroDefinition[] = [];
+  const header = /macro_rules!\s*([A-Za-z_]\w*)\s*\{/g;
+  for (let match = header.exec(clean); match !== null; match = header.exec(clean)) {
+    let depth = 1;
+    let end = header.lastIndex;
+    for (; end < clean.length && depth > 0; end++) {
+      if (clean[end] === "{") depth++;
+      else if (clean[end] === "}") depth--;
+    }
+    if (depth !== 0) break;
+    definitions.push({
+      name: match[1] ?? "",
+      body: clean.slice(header.lastIndex, end - 1),
+      start: match.index,
+      end,
+    });
+    header.lastIndex = end;
+  }
+  return definitions;
+}
+
+function macroNamesReaching(code: string, direct: RegExp): ReadonlySet<string> {
+  const definitions = extractMacroDefinitions(code);
+  const reached = new Set(
+    definitions.filter((definition) => direct.test(definition.body)).map((definition) => definition.name),
+  );
+
+  // Macro wrappers may delegate to another wrapper. Iterate to a fixed point
+  // so A! -> B! -> require_auth is treated the same as a direct call.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const definition of definitions) {
+      if (reached.has(definition.name)) continue;
+      for (const call of definition.body.matchAll(MACRO_CALL)) {
+        if (reached.has(call[1] ?? "")) {
+          reached.add(definition.name);
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+  return reached;
+}
+
+/** Local macros whose every recognized body reaches `require_auth[ _for_args]`. */
+export function authorizationMacroNames(code: string): ReadonlySet<string> {
+  return macroNamesReaching(code, new RegExp(AUTH_CALL_SOURCE));
+}
+
+/** Local macros that reach a recognized TTL extension API. */
+export function ttlExtensionMacroNames(code: string): ReadonlySet<string> {
+  return macroNamesReaching(code, TTL_CALL);
+}
+
+function firstMacroInvocation(body: string, names: ReadonlySet<string>): number | null {
+  let earliest: number | null = null;
+  for (const call of body.matchAll(MACRO_CALL)) {
+    if (!names.has(call[1] ?? "")) continue;
+    const offset = call.index ?? 0;
+    if (earliest === null || offset < earliest) earliest = offset;
+  }
+  return earliest;
+}
+
+/**
+ * Earliest authorization boundary in a function body, or null when absent.
+ * Authorization attributes expand before the first statement, so they win at
+ * offset zero. Inline and local-macro boundaries retain source order.
+ */
+export function firstAuthorizationOffset(
+  fn: ScannedFunction,
+  macros: ReadonlySet<string> = new Set(),
+): number | null {
+  if (hasAuthAttribute(fn)) return 0;
+  const body = sanitizeKeepLines(fn.bodyInner);
+  const direct = new RegExp(AUTH_CALL_SOURCE).exec(body);
+  const macro = firstMacroInvocation(body, macros);
+  if (direct === null) return macro;
+  if (macro === null) return direct.index;
+  return Math.min(direct.index, macro);
+}
+
+export function hasAuthorizationBoundary(
+  fn: ScannedFunction,
+  macros: ReadonlySet<string> = new Set(),
+): boolean {
+  return firstAuthorizationOffset(fn, macros) !== null;
+}
+
+export function hasTtlExtension(
+  code: string,
+  macros: ReadonlySet<string> = ttlExtensionMacroNames(code),
+): boolean {
+  const clean = removeComments(code);
+  // A definition contains implementation text but cannot extend TTL by itself.
+  // Blank definitions while preserving line breaks, then look for a real call.
+  let executable = clean;
+  for (const definition of extractMacroDefinitions(code)) {
+    executable =
+      executable.slice(0, definition.start) +
+      executable.slice(definition.start, definition.end).replace(/[^\n]/g, " ") +
+      executable.slice(definition.end);
+  }
+  return TTL_CALL.test(executable) || firstMacroInvocation(executable, macros) !== null;
 }
 
 /** Finds the 1-based line of the first regex match, or null when absent. */

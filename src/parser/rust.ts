@@ -126,5 +126,38 @@ function toAstFunction(node: import("tree-sitter").SyntaxNode): ScannedFunction 
     bodyInner: open >= 0 ? body.slice(open + 1) : "",
     bodyLine,
     bodyColumn: bodyNode.startPosition.column + 1,
+    attributes: outerAttributes(node),
   };
+}
+
+/**
+ * Outer attributes attached to a declaration. Tree-sitter exposes them as
+ * sibling `attribute_item` nodes before the function, interleaved with line
+ * or block comments. Any other item ends the run, preventing an attribute
+ * from leaking onto the next declaration.
+ */
+function outerAttributes(node: import("tree-sitter").SyntaxNode): string[] {
+  const attributes: string[] = [];
+  for (
+    let sibling = node.previousNamedSibling;
+    sibling !== null;
+    sibling = sibling.previousNamedSibling
+  ) {
+    if (sibling.type === "line_comment" || sibling.type === "block_comment") {
+      continue;
+    }
+    if (sibling.type !== "attribute_item") {
+      break;
+    }
+    attributes.unshift(normalizeAttribute(sibling.text));
+  }
+  return attributes;
+}
+
+function normalizeAttribute(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("#[") || !trimmed.endsWith("]")) {
+    return trimmed;
+  }
+  return trimmed.slice(2, -1).replace(/\s+/g, " ").trim();
 }
