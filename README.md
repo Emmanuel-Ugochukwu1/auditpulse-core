@@ -189,6 +189,14 @@ levels) and one result per finding with file URI and start line (plus start
 column when the rule verified it), ready for
 upload to GitHub Code Scanning.
 
+Rules also carry a `helpUri` (a README anchor derived from the rule id,
+overridable by callers), `properties.tags`, and a `precision` mapped from
+the finding model's confidence when present. Each result includes a
+`partialFingerprints.primaryLocationLineHash` — a SHA-256 over the file
+URI, rule id and message only — so fingerprints stay stable when code
+shifts lines between runs, and each run carries `automationDetails`
+identifying the tool version.
+
 ## Configuration
 
 An optional `auditpulse.toml` is discovered in the scan target's directory or

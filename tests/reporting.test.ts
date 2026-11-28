@@ -201,6 +201,85 @@ describe("SARIF output", () => {
   });
 });
 
+describe("SARIF metadata enrichment", () => {
+  const ruleDescriptions = new Map([
+    ["AP-AUTH-001", "Detects authorization-sensitive operations without require_auth."],
+    ["AP-DEBUG-001", "Detects debug macros left in production code."],
+  ]);
+
+  function sarifLog(findings: FileFinding[], extra: object = {}) {
+    return JSON.parse(
+      renderSarif(report(findings), { ruleDescriptions, ...extra }),
+    ) as any;
+  }
+
+  it("emits a default helpUri derived from the rule id, honouring overrides", () => {
+    const log = sarifLog(
+      [
+        finding({ file: "a.rs" }),
+        finding({ id: "AP-DEBUG-001", severity: "low", file: "b.rs", message: "dbg!" }),
+      ],
+      { ruleHelpUris: new Map([["AP-DEBUG-001", "https://example.com/ap-debug"]]) },
+    );
+
+    const rules = Object.fromEntries(
+      log.runs[0].tool.driver.rules.map((r: any) => [r.id, r]),
+    );
+    expect(rules["AP-AUTH-001"].helpUri).toContain("#ap-auth-001");
+    expect(rules["AP-AUTH-001"].helpUri).toContain("README.md");
+    expect(rules["AP-DEBUG-001"].helpUri).toBe("https://example.com/ap-debug");
+    expect(rules["AP-AUTH-001"].properties.tags).toContain("security");
+  });
+
+  it("passes finding confidence through as rule precision, omitting it when absent", () => {
+    const log = sarifLog([
+      finding({ file: "a.rs", confidence: "high" }),
+      finding({
+        id: "AP-DEBUG-001",
+        severity: "low",
+        confidence: undefined,
+        file: "b.rs",
+        message: "dbg!",
+      }),
+    ]);
+
+    const rules = Object.fromEntries(
+      log.runs[0].tool.driver.rules.map((r: any) => [r.id, r]),
+    );
+    expect(rules["AP-AUTH-001"].precision).toBe("high");
+    expect(rules["AP-DEBUG-001"].precision).toBeUndefined();
+  });
+
+  it("emits deterministic partialFingerprints that survive line shifts", () => {
+    const atLine7 = sarifLog([finding({ file: "a.rs", location: { line: 7 } })]);
+    const atLine99 = sarifLog([finding({ file: "a.rs", location: { line: 99 } })]);
+    const otherFile = sarifLog([finding({ file: "other.rs", location: { line: 7 } })]);
+
+    const hash = (log: any) =>
+      log.runs[0].results[0].partialFingerprints.primaryLocationLineHash;
+
+    expect(hash(atLine7)).toMatch(/^[0-9a-f]{64}$/);
+    // Same file/rule/message at a different line: identical fingerprint.
+    expect(hash(atLine99)).toBe(hash(atLine7));
+    // A different artifact is a different alert.
+    expect(hash(otherFile)).not.toBe(hash(atLine7));
+  });
+
+  it("carries automationDetails with the tool version and keeps existing fields", () => {
+    const log = sarifLog([finding({ file: "a.rs", location: { line: 3 } })]);
+
+    expect(log.runs[0].automationDetails.id).toMatch(/^auditpulse\//);
+    expect(log.runs[0].automationDetails.description.text).toContain("scan run");
+
+    // Everything a pre-enrichment consumer relied on is unchanged.
+    const result = log.runs[0].results[0];
+    expect(result.ruleId).toBe("AP-AUTH-001");
+    expect(result.level).toBe("error");
+    expect(result.locations[0].physicalLocation.region.startLine).toBe(3);
+    expect(log.runs[0].tool.driver.rules[0].defaultConfiguration.level).toBe("error");
+  });
+});
+
 describe("human output", () => {
   it("shows line:column and function names only when available", () => {
     const out = renderHuman(
