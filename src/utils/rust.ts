@@ -97,8 +97,11 @@ export function locateLine(
 
 /**
  * Extracts top-level functions by brace counting, one nesting level per
- * function. `macro_rules!` blocks are skipped as a unit (brace-based, no
- * macro internals are parsed).
+ * function. Functions written inside a `macro_rules!` body are extracted
+ * too: the macro only stamps them out at expansion time, but the body is
+ * where the code actually lives, so that is where findings belong.
+ * Patterns that bind the function name with a metavariable (`fn $name`)
+ * can't be named here and are left alone.
  */
 export function extractRustFunctions(code: string): ScannedFunction[] {
   const lines = code.split("\n");
@@ -113,16 +116,6 @@ export function extractRustFunctions(code: string): ScannedFunction[] {
     const line = lines[i] ?? "";
 
     if (current === null) {
-      // Skip macro_rules! bodies entirely.
-      if (/macro_rules!/.test(line)) {
-        let depth = count(line, "{") - count(line, "}");
-        while (depth > 0 && i + 1 < lines.length) {
-          i++;
-          depth += count(lines[i] ?? "", "{") - count(lines[i] ?? "", "}");
-        }
-        continue;
-      }
-
       const match = /\bfn\s+([A-Za-z_]\w*)\s*[(<]/.exec(line);
       if (!match) {
         continue;

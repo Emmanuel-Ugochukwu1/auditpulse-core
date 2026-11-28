@@ -1,5 +1,6 @@
 import { createRequire } from "module";
 import type { ScannedFunction } from "../types";
+import { extractRustFunctions } from "../utils/rust.js";
 
 /**
  * Isolated Tree-sitter Rust parser (AP-005).
@@ -91,6 +92,21 @@ function collectFunctions(
       const fn = toAstFunction(child);
       if (fn) out.push(fn);
       continue; // declarations cannot nest inside declared bodies
+    }
+    if (child.type === "macro_definition") {
+      // A macro_rules! body is one big token tree to tree-sitter, so any
+      // functions in it are invisible here. Pull them out of the raw text
+      // instead and shift them back to their real line numbers.
+      const firstLine = child.startPosition.row;
+      for (const fn of extractRustFunctions(child.text)) {
+        out.push({
+          ...fn,
+          line: fn.line + firstLine,
+          endLine: fn.endLine + firstLine,
+          bodyLine: fn.bodyLine + firstLine,
+        });
+      }
+      continue;
     }
     collectFunctions(child, out);
   }
